@@ -47,7 +47,10 @@ import kotlin.math.sqrt
 object OffscreenPreview {
     suspend fun capture(context: Context, bundle: ProjectBundle, device: JsonObject): ByteArray =
         withContext(Dispatchers.Main.immediate) {
-            withTimeout(30_000) { captureOnMain(context.applicationContext, bundle, device.deepCopy()) }
+            // withTimeout would throw a CancellationException, which callers rethrow as a cancel and so never
+            // record the failure, leaving the build waiting forever. A timeout is a capture failure.
+            withTimeoutOrNull(30_000) { captureOnMain(context.applicationContext, bundle, device.deepCopy()) }
+                ?: throw IllegalStateException("The app preview did not finish rendering within 30 seconds.")
         }
 
     private suspend fun captureOnMain(context: Context, bundle: ProjectBundle, device: JsonObject): ByteArray {

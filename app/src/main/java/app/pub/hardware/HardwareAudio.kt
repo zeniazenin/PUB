@@ -39,6 +39,8 @@ internal class HardwareAudio(
     private var routeRequiresSelection = false
     private var routeEmitter: ((String, JsonObject) -> Unit)? = null
     private var chooserPending = false
+    // The route request whose chooser is open. The broker keeps its hardware-screen lock until it is answered.
+    private var chooserEmitter: ((String, JsonObject) -> Unit)? = null
     private var routeCallbacksRegistered = false
     private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) = checkActiveRoute()
@@ -206,6 +208,7 @@ internal class HardwareAudio(
         val devices = audioManager.availableCommunicationDevices.take(32)
         if (devices.isEmpty()) { emit("error", PlatformHardware.error("unavailable", "No communication audio devices are available.")); return }
         chooserPending = true
+        chooserEmitter = emit
         val generation = ++routeGeneration
         chooseDevice(devices.map { device ->
             val product = device.productName?.toString()?.take(80).orEmpty()
@@ -213,7 +216,7 @@ internal class HardwareAudio(
             DeviceChoice(deviceKey(device), if (product.isBlank() || product.equals(generic, true)) generic else "$product · $generic")
         }) { chosen -> main.post {
             if (closed || generation != routeGeneration || !chooserPending) return@post
-            chooserPending = false
+            chooserPending = false; chooserEmitter = null
             if (chosen == null) { emit("error", PlatformHardware.error("cancelled", "Audio-device selection was cancelled.")); return@post }
             try {
                 requireBluetoothPermission()
@@ -316,12 +319,10 @@ internal class HardwareAudio(
     }
     private fun loseRoute(message: String) {
         val notify = routeEmitter
-        val pendingError = pendingRouteError
         stopOutput()
-        resetRoute()
+        resetRoute(message) // Also answers a pending chooser or route activation.
         routeRequiresSelection = true
         notify?.invoke("audio.routeLost", PlatformHardware.error("route_lost", message))
-        pendingError?.invoke(message)
     }
     @SuppressLint("MissingPermission")
     private fun matchingInput(output: AudioDeviceInfo): AudioDeviceInfo? {
@@ -337,11 +338,21 @@ internal class HardwareAudio(
         return if (address.isNotBlank()) matching.firstOrNull { it.address == address } ?: matching.singleOrNull { it.address.isBlank() }
         else matching.singleOrNull()
     }
-    private fun resetRoute() {
-        routeGeneration++; chooserPending = false; pendingOutputId = null; pendingRouteError = null
+    /**
+     * Clears all routing state. Bumping routeGeneration silences the chooser and activation callbacks,
+     * so a request still waiting on either is answered here; otherwise the broker's hardware-screen
+     * lock and picker dialog would stay held for the rest of the session.
+     */
+    private fun resetRoute(reason: String = "Audio routing was reset.") {
+        val chooser = chooserEmitter.takeIf { chooserPending }
+        val pendingError = pendingRouteError
+        routeGeneration++; chooserPending = false; chooserEmitter = null; pendingOutputId = null; pendingRouteError = null
         activeOutputId = null; routeEmitter = null; routeRequiresSelection = false
         routeDeadline?.let(main::removeCallbacks); routeDeadline = null
         releaseNativeRoute()
+        if (closed) return
+        chooser?.invoke("error", PlatformHardware.error("cancelled", reason))
+        pendingError?.invoke(reason)
     }
     private fun releaseNativeRoute() {
         if (originalMode != null) {

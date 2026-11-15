@@ -23,6 +23,9 @@ class UsbHardware(private val context:Context,private val choose:(List<DeviceCho
     private var pendingGrant:PendingIntent?=null
     private var busy=false
     private var epoch=0L
+    // The choose request still waiting on the chooser or Android's USB grant. It must always get a reply,
+    // because the broker keeps its hardware-screen lock until then.
+    private var selectionEmit:((String,JsonObject)->Unit)?=null
     fun handle(operation:String,args:JsonObject,emit:(String,JsonObject)->Unit) {
         if(closed) return
         fun error(message:String)=emit("error",JsonObject().apply {addProperty("message",message)})
@@ -32,14 +35,15 @@ class UsbHardware(private val context:Context,private val choose:(List<DeviceCho
             if(busy) {error("A USB selection is already pending.");return}
             disconnect();busy=true
             val selectionEpoch=epoch
+            selectionEmit=emit
             val choices=manager.deviceList.values.take(32).associateBy { UUID.randomUUID().toString() }
             choose(choices.map { (id,d)->DeviceChoice(id,"${d.productName ?: "USB device"} (${d.vendorId}:${d.productId})") }) { id ->
                 if(closed || epoch!=selectionEpoch) return@choose
                 val device=choices[id]
-                if(device==null) {busy=false;emit("cancelled",JsonObject());return@choose}
+                if(device==null) {busy=false;selectionEmit=null;emit("cancelled",JsonObject());return@choose}
                 val open={
                     if(!closed && epoch==selectionEpoch) {
-                    busy=false
+                    busy=false;selectionEmit=null
                     if(!closed && manager.hasPermission(device)) {
                         val conn=manager.openDevice(device)
                         if(conn==null) error("USB device could not be opened.") else {
@@ -79,7 +83,7 @@ class UsbHardware(private val context:Context,private val choose:(List<DeviceCho
                     else context.registerReceiver(listener,IntentFilter(action))
                     val pi=PendingIntent.getBroadcast(context,0,Intent(action).setPackage(context.packageName),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
                     pendingGrant=pi;manager.requestPermission(device,pi)
-                    main.postDelayed({if(receiver===listener && epoch==selectionEpoch) {clearGrant();busy=false;error("USB permission request timed out.")}},30000)
+                    main.postDelayed({if(receiver===listener && epoch==selectionEpoch) {clearGrant();busy=false;selectionEmit=null;error("USB permission request timed out.")}},30000)
                 }
             }
             return
@@ -118,6 +122,10 @@ class UsbHardware(private val context:Context,private val choose:(List<DeviceCho
         }
     }
     private fun clearGrant() {receiver?.let {runCatching {context.unregisterReceiver(it)}};receiver=null;pendingGrant?.cancel();pendingGrant=null}
-    private fun disconnect() {epoch++;clearGrant();connection?.let {c->claimed?.let {runCatching {c.releaseInterface(it)}};runCatching {c.close()}};claimed=null;connection=null;selected=null;busy=false}
+    private fun disconnect() {
+        val waiting=selectionEmit;selectionEmit=null
+        epoch++;clearGrant();connection?.let {c->claimed?.let {runCatching {c.releaseInterface(it)}};runCatching {c.close()}};claimed=null;connection=null;selected=null;busy=false
+        if(!closed) waiting?.invoke("cancelled",JsonObject()) // Selection invalidated before it finished.
+    }
     fun close() {closed=true;main.removeCallbacksAndMessages(null);disconnect();worker.shutdownNow()}
 }

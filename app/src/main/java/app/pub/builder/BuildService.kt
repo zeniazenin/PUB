@@ -143,7 +143,7 @@ class BuildService : Service() {
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val remaining = wakeDeadline - SystemClock.elapsedRealtime()
-        if (remaining <= 0) return // Never extend the total 20-minute budget on progress updates.
+        if (remaining <= 0) return // Never extend the total wake budget on progress updates.
         runCatching {
             val lock = wakeLock ?: getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "app.pub:BuildService").apply {
                 setReferenceCounted(false)
@@ -215,7 +215,9 @@ class BuildService : Service() {
         internal const val ACTION_START = "app.pub.builder.START_BUILD_SERVICE"
         internal const val ACTION_CANCEL = "app.pub.builder.CANCEL_BUILD"
         internal const val EXTRA_RUN_TOKEN = "build_service_run"
-        private const val MAX_WAKE_MILLIS = 20 * 60 * 1000L
+        // Covers a long generation, image generation, review and both automatic repair passes with the
+        // screen off. It is a fixed upper bound per build, not extended by progress.
+        private const val MAX_WAKE_MILLIS = 60 * 60 * 1000L
 
         /** Call from the initiating UI action after setting buildInProgress, before starting paid work. */
         fun start(context: Context) {

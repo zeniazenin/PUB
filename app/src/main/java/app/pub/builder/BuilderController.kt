@@ -190,26 +190,43 @@ class BuilderController(private val application: Application, private val backen
         }
     }
     override fun setVisible(value: Boolean) { auth.foreground=value }
+    /**
+     * cancel() aborts blocking network I/O, which then fails with IOException or "Operation cancelled"
+     * instead of CancellationException. Rethrow those as the cancellation they are, so history,
+     * messages and the build notification record a cancel rather than a connection failure.
+     */
+    private suspend fun <T> network(block: () -> T): T = try {
+        withContext(Dispatchers.IO) { block() }
+    } catch (error: Exception) {
+        if (error !is CancellationException) currentCoroutineContext().ensureActive()
+        throw error
+    }
+    /** Keeps cancel()'s more specific build message instead of replacing it with a generic one. */
+    private fun cancelledMessage() = message?.takeIf { it.startsWith("Build cancelled") } ?: "Cancelled"
     private fun operation(label: String, block: suspend () -> Unit) {
         if(busy!=null) return
         val epoch = ++operationEpoch
         busy=label;message=null;auth.prepare()
         job=scope.launch {
             try { block() }
-            catch (_: CancellationException) { if (epoch == operationEpoch) message="Cancelled" }
-            catch (e: Exception) { if (epoch == operationEpoch) message=if(e is IllegalStateException) e.message?.take(240) else "Could not complete this request. Check your connection or try a simpler app description." }
+            catch (_: CancellationException) { if (epoch == operationEpoch) message=cancelledMessage() }
+            catch (e: Exception) { if (epoch == operationEpoch) message=when {
+                !isActive -> cancelledMessage()
+                e is IllegalStateException -> e.message?.take(240)
+                else -> "Could not complete this request. Check your connection or try a simpler app description."
+            } }
             finally { if (epoch == operationEpoch) { account=auth.accountLabel();imageToolsUnavailable=auth.imageToolsUnavailable();busy=null;withContext(NonCancellable) {settleBuild()} } }
         }
     }
     override fun connect()=operation("Waiting for ChatGPT sign-in…") {
-        withContext(Dispatchers.IO) { auth.signIn { url -> main.post {
+        network { auth.signIn { url -> main.post {
             runCatching { application.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 .onFailure { auth.cancel() }
         } } }
         account=auth.accountLabel();loadModels();message="ChatGPT connected. Describe your first app."
     }
     private suspend fun loadModels() {
-        models=withContext(Dispatchers.IO) { auth.models() }
+        models=network { auth.models() }
         updateModelSelection()
     }
     private fun updateModelSelection() {
@@ -258,7 +275,7 @@ class BuilderController(private val application: Application, private val backen
                 }
                 currentCoroutineContext().ensureActive()
                 reloadHistory()
-                val generated=withContext(Dispatchers.IO) { (backend?.generate(model,request,context,existing) ?: generator.generate(model,request,context,existing)) }
+                val generated=network { (backend?.generate(model,request,context,existing) ?: generator.generate(model,request,context,existing)) }
                 check(historyOutcome(historyId,"ready",generated.name)) { "The app was built, but its local prompt history could not be saved. Check available storage and try again." }
                 currentCoroutineContext().ensureActive()
                 draft=generated;draftHistoryId=historyId;draftRequest=request;draftModel=model;draftRepairPass=0
@@ -268,11 +285,15 @@ class BuilderController(private val application: Application, private val backen
                 persistDraft()
             } catch(error: CancellationException) {
                 capturePending=null
-                historyOutcome(historyId,"cancelled");throw error
+                // Once committed, this draft stays available, so its history must remain "ready" for Save.
+                if(!(historyId!=null && draftHistoryId==historyId)) historyOutcome(historyId,"cancelled")
+                throw error
             } catch(error: Exception) {
                 capturePending=null
-                if(backgroundManaged) visualReviewError="The build did not complete. Any previous draft has been kept."
-                historyOutcome(historyId,"failed")
+                if(!(historyId!=null && draftHistoryId==historyId)) {
+                    if(backgroundManaged) visualReviewError="The build did not complete. Any previous draft has been kept."
+                    historyOutcome(historyId,"failed")
+                }
                 if(error is PromptHistoryFullException) throw error
                 if(historyId==null) throw IllegalStateException("Could not save local prompt history. Existing history has been preserved; check available storage and try again.",error)
                 throw error
@@ -305,7 +326,7 @@ class BuilderController(private val application: Application, private val backen
         operation("Checking screen ${capture.repairPass+1} of ${MAX_VISUAL_REPAIRS+1}...") {
             var repairHistoryId:String?=null
             try {
-                val result=withContext(Dispatchers.IO) {
+                val result=network {
                     backend?.assess(capture.model,capture.request,capture.bundle,png)
                         ?: VisualReview(auth).assess(capture.model,capture.request,capture.bundle,png)
                 }
@@ -339,7 +360,7 @@ class BuilderController(private val application: Application, private val backen
                         }
                         currentCoroutineContext().ensureActive()
                         reloadHistory()
-                        val repaired=withContext(Dispatchers.IO) {
+                        val repaired=network {
                             backend?.generate(capture.model,instruction,context,capture.bundle)
                                 ?: generator.generate(capture.model,instruction,context,capture.bundle)
                         }
@@ -356,12 +377,13 @@ class BuilderController(private val application: Application, private val backen
                     }
                 }
             } catch(error:CancellationException) {
-                historyOutcome(repairHistoryId,"cancelled")
+                // A committed repair is the current draft; keep its history "ready" so it can be saved.
+                if(draftHistoryId!=repairHistoryId) historyOutcome(repairHistoryId,"cancelled")
                 if(draftHistoryId==capture.historyId) visualReviewError="Automatic visual review was cancelled. Your latest valid draft is still available."
                 throw error
             } catch(error:Exception) {
                 capturePending=null
-                historyOutcome(repairHistoryId,"failed")
+                if(draftHistoryId!=repairHistoryId) historyOutcome(repairHistoryId,"failed")
                 visualReviewError=if(error is IllegalStateException) error.message?.take(400) ?: "Automatic visual review unavailable" else "Automatic visual review could not complete. Your latest valid draft has been kept."
                 message="Automatic checking stopped. Preview the current draft or retry its review."
             }
@@ -380,7 +402,8 @@ class BuilderController(private val application: Application, private val backen
         else capturePending=capture
     }
     override fun cancel() {
-        capturePending=null;captureJob?.cancel();auth.cancel();job?.cancel()
+        // Cancel the coroutines before aborting network I/O, so the failing call is seen as a cancellation.
+        capturePending=null;job?.cancel();captureJob?.cancel();auth.cancel()
         if(buildInProgress) {message="Build cancelled. Any completed draft has been kept.";visualReviewError="Automatic building was cancelled.";scope.launch {settleBuild()}}
     }
     fun close() {cancel();scope.cancel()}

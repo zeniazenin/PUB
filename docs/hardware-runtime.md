@@ -37,7 +37,7 @@ Hardware effects are `{type:"hardware.request",id,capability,operation,args}`. H
 
 Only the native host determines project identity. Explicit device selection grants access to the selected device for the session. Generated scripts cannot open arbitrary Android classes, filesystem paths, arbitrary device addresses or arbitrary image URLs. Isolated JavaScript still has no INTERNET permission. A capability declaration alone grants no hardware access.
 
-Each broker is bound to a project session and foreground epoch. Closing/revoking invalidates pending Android requests, native pickers and late callbacks. Stream replies recheck policy and Android permissions. Native adapters use bounded buffers/deadlines; no unbounded frame/audio streams cross Binder. Only high-rate updates may be dropped under backpressure; request results are retained.
+Each broker is bound to a project session and foreground epoch. Closing/revoking invalidates pending Android requests, native pickers and late callbacks. Stream replies recheck policy and Android permissions. Native adapters use bounded buffers/deadlines; no unbounded frame/audio streams cross Binder. Only high-rate updates may be dropped under backpressure: while the script is busy, each sensor, location or BLE-notification stream keeps only its newest pending value, and stopping hardware discards those pending values. Request results are retained.
 
 Photo assets use host-issued UUID filenames, strict project containment, atomic writes/copy and quotas. Rejected late captures are deleted. Save failure rolls back the newly created project. Closing previews and startup cleanup remove temporary photos; saved photos survive upgrades and are removed when their app is deleted.
 

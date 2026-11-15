@@ -84,7 +84,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     fun changeHardwareBlock(cap: String,value: Boolean) { require(cap in HardwareContract.OPERATIONS);permissionPrefs.edit().putBoolean("$cap.blocked",value).apply();stopHardware();hardwareRevision++;updateContext() }
     fun changeHardwareDefault(cap: String,value: Rule) { require(cap in HardwareContract.OPERATIONS && value in setOf(Rule.ASK,Rule.ALLOW));permissionPrefs.edit().putString("$cap.default",value.name).apply();stopHardware();hardwareRevision++ }
     fun changeHardwareRule(id: String,cap: String,value: Rule) { requireProjectId(id);require(cap in HardwareContract.OPERATIONS);permissionPrefs.edit().putString("$id.$cap",value.name).apply();stopHardware();hardwareRevision++ }
-    fun stopHardware() { hardwareEpoch++;hardware?.close();hardware=null;hardwarePrompt=null;hardwareAndroidRequest=null;devicePicker=null;cameraRequest=null;nfcRequest=null;hardwareRevision++;broker.stop();runtime?.send(event("hardwareStopped")) }
+    fun stopHardware() { hardwareEpoch++;hardware?.close();hardware=null;hardwarePrompt=null;hardwareAndroidRequest=null;devicePicker=null;cameraRequest=null;nfcRequest=null;hardwareRevision++;broker.stop();runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped")) }
     private fun hardwareBroker(): HardwareBroker {
         if(hardware?.isClosed==true) {hardware=null;hardwareEpoch++}
         return hardware ?: run {
@@ -92,8 +92,11 @@ class HostModel(application: Application) : AndroidViewModel(application) {
             HardwareBroker(context,projectId,preview,capabilities,{ visible && projectOpen && hardwareEpoch==epoch },
                 {if(hardwareEpoch==epoch) hardwarePrompt=it},{if(hardwareEpoch==epoch) hardwareAndroidRequest=it},{if(hardwareEpoch==epoch) devicePicker=it},
                 {callback->if(hardwareEpoch==epoch) cameraRequest=callback},{callback->if(hardwareEpoch==epoch) nfcRequest=callback},
-                {packet,disposable->if(hardwareEpoch==epoch) { if(packet["event"]?.asString=="audio.routeLost") broker.stop("Audio route disconnected");runtime?.send(packet,disposable) }},
-                {if(hardware?.isClosed==true) {broker.stop("Hardware access ended");runtime?.send(event("hardwareStopped"))};hardwareRevision++;updateContext()}).also {hardware=it}
+                // Stream data (sensors, location, notifications) keeps only its newest value per stream while the
+                // script is busy, so concurrent streams all get delivered and none can exhaust the event queue.
+                {packet,disposable->if(hardwareEpoch==epoch) { if(packet["event"]?.asString=="audio.routeLost") broker.stop("Audio route disconnected")
+                    runtime?.send(packet,key=if(disposable) "$HARDWARE_STREAM${packet["id"].asString}:${packet["event"].asString}" else null) }},
+                {if(hardware?.isClosed==true) {broker.stop("Hardware access ended");runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped"))};hardwareRevision++;updateContext()}).also {hardware=it}
         }
     }
     var ui by mutableStateOf<JsonObject?>(null)
@@ -324,7 +327,8 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun action(value: String) { if (!projectOpen) return; hardwareIntent = true; runtime?.send(event("action").apply { addProperty("action", value) }) }
-    fun input(action: String, value: String) { runtime?.send(event("input").apply { addProperty("action", action); addProperty("value", value.take(2000)) }) }
+    // Each keystroke carries the field's full text, so only the newest pending value per field is needed.
+    fun input(action: String, value: String) { runtime?.send(event("input").apply { addProperty("action", action); addProperty("value", value.take(2000)) }, key = "input:$action") }
     fun setVisible(value: Boolean) {
         visible = value
         broker.setForeground(value && projectOpen)
@@ -431,4 +435,5 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     }
     private fun event(type: String) = JsonObject().apply { addProperty("type", type) }
     override fun onCleared() { hardware?.close();runtime?.close(); broker.close(); super.onCleared() }
+    private companion object { const val HARDWARE_STREAM = "hardware:" }
 }

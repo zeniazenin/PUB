@@ -34,9 +34,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * UUIDs may be canonical or 4/8 hex digit Bluetooth shorthand. `data` is bytes, not base64.
  *
  * GATT operations are serialized; concurrent operations return busy instead of being queued.
- * Connect/service discovery: 15s total. GATT read/write/subscribe: 10s. RFCOMM connect/write:15s.
+ * Connect/MTU negotiation/service discovery: 15s total. GATT read/write/subscribe: 10s. RFCOMM connect/write:15s.
+ * The `services` event reports the negotiated `mtu`; writes without response are limited to mtu - 3 bytes.
  * RFCOMM read timeout closes that socket to interrupt its blocking read; reconnect afterwards.
- * BLE notifications are lossy, rate-limited to at most 10 events/second for this connection.
+ * BLE notifications are rate-limited to at most 10 events/second per characteristic; within a burst,
+ * intermediate values are dropped but the latest value is always delivered.
  * Events: status, device, services, value, result, error, disconnected, cancelled.
  * Every value event includes a bounded `bytes` array; addresses never leave this adapter.
  * `close()` is terminal: immediately suppresses callbacks, then stops scans/connections/workers.
@@ -56,6 +58,7 @@ class BluetoothHardware(
     private var connectionEpoch = 0L
     @Volatile private var chooserEpoch = 0L
     private var chooserActive = false
+    private var chooserEmit: Emitter? = null
     private var scanning: ScanCallback? = null
     private var scanDeadline: Runnable? = null
     private var chooserDeadline: Runnable? = null
@@ -66,7 +69,10 @@ class BluetoothHardware(
     private var connectionEmit: Emitter? = null
     private var pending: Pending? = null
     private val subscriptions = mutableMapOf<String, Emitter>()
-    private var lastNotification = 0L
+    private val lastNotification = mutableMapOf<String, Long>()
+    private val trailingNotification = mutableMapOf<String, Runnable>()
+    private var attMtu = DEFAULT_MTU
+    private var discoveryStarted = false
 
     private data class Candidate(val id: String, val device: BluetoothDevice, val name: String, val paired: Boolean)
     private data class Pending(
@@ -120,14 +126,15 @@ class BluetoothHardware(
             } catch (_: SecurityException) {
                 val hadPending = pending != null
                 finishPendingError("permission", "Bluetooth permission was revoked.")
-                cancelChooser()
+                // A failing choose gets its error below; an earlier open chooser is answered as cancelled.
+                cancelChooser(notify = operation != "choose")
                 resetConnection()
                 if (!hadPending) fail(emit, operation, "permission", "Bluetooth permission was revoked. Review Settings → Access.")
             } catch (_: Exception) {
                 // Platform exceptions sometimes contain the hardware MAC; never forward their messages.
                 val hadPending = pending != null
                 finishPendingError("unavailable", "Bluetooth could not complete this operation.")
-                cancelChooser()
+                cancelChooser(notify = operation != "choose")
                 resetConnection()
                 if (!hadPending) fail(emit, operation, "unavailable", "Bluetooth could not complete this operation. Check the selected device and its supported protocol.")
             }
@@ -146,6 +153,7 @@ class BluetoothHardware(
         resetConnection()
         selected = null
         chooserActive = true
+        chooserEmit = emit
         val epoch = ++chooserEpoch
         fun present() {
             if (closed.get() || chooserEpoch != epoch || !chooserActive) return
@@ -185,7 +193,7 @@ class BluetoothHardware(
                     }
                 } catch (_: Exception) {
                     worker.post {
-                        if (chooserEpoch == epoch) { cancelChooser(); fail(emit, "choose", "unavailable", "Could not open the Bluetooth device chooser.") }
+                        if (chooserEpoch == epoch) { cancelChooser(notify = false); fail(emit, "choose", "unavailable", "Could not open the Bluetooth device chooser.") }
                     }
                 }
             }
@@ -235,10 +243,17 @@ class BluetoothHardware(
         if (callback != null) runCatching { adapter?.bluetoothLeScanner?.stopScan(callback) }
     }
 
-    private fun cancelChooser() {
-        chooserEpoch++; chooserActive = false
+    /**
+     * Invalidates any open chooser. The broker keeps its hardware-screen lock (and the picker dialog)
+     * until the choose request is answered, so an active chooser is answered as cancelled unless the
+     * caller is about to report its own error for that request.
+     */
+    private fun cancelChooser(notify: Boolean = true) {
+        val waiting = chooserEmit.takeIf { chooserActive && notify }
+        chooserEpoch++; chooserActive = false; chooserEmit = null
         chooserDeadline?.let(worker::removeCallbacks); chooserDeadline = null
         stopScan()
+        waiting?.let { send(it, "cancelled", obj { addProperty("operation", "choose") }) }
     }
 
     private fun connect(emit: Emitter) {
@@ -259,16 +274,22 @@ class BluetoothHardware(
                         disconnected("connection_error")
                     }
                     newState == BluetoothProfile.STATE_CONNECTED -> {
-                        if (!runCatching { client.discoverServices() }.getOrDefault(false)) {
-                            finishPendingError("discovery_failed", "Could not discover the device's GATT services.")
-                            disconnected("discovery_failed")
-                        }
+                        // Without a larger ATT MTU, writes are limited to 20 bytes. Discovery follows
+                        // onMtuChanged; peripherals that never answer the exchange fall back after 5s.
+                        if (runCatching { client.requestMtu(REQUESTED_MTU) }.getOrDefault(false)) {
+                            worker.postDelayed({ if (current(client)) discover(client) }, MTU_FALLBACK_MS)
+                        } else discover(client)
                     }
                     newState == BluetoothProfile.STATE_DISCONNECTED -> {
                         finishPendingError("disconnected", "The Bluetooth device disconnected.")
                         disconnected("remote")
                     }
                 }
+            }
+            override fun onMtuChanged(client: BluetoothGatt, mtu: Int, status: Int) {
+                if (!current(client)) return
+                if (status == BluetoothGatt.GATT_SUCCESS) attMtu = mtu.coerceIn(DEFAULT_MTU, REQUESTED_MTU)
+                discover(client) // No-op once discovery started (the peripheral may also renegotiate later).
             }
             override fun onServicesDiscovered(client: BluetoothGatt, status: Int) {
                 if (!current(client)) return
@@ -321,6 +342,16 @@ class BluetoothHardware(
         if (gatt == null) { finishPendingError("connect_failed", "Could not open a GATT connection."); resetConnection() }
     }
 
+    /** Starts GATT service discovery once per connection, after MTU negotiation. Runs on [worker]. */
+    private fun discover(client: BluetoothGatt) {
+        if (discoveryStarted || pending?.operation != "connect") return
+        discoveryStarted = true
+        if (!runCatching { client.discoverServices() }.getOrDefault(false)) {
+            finishPendingError("discovery_failed", "Could not discover the device's GATT services.")
+            disconnected("discovery_failed")
+        }
+    }
+
     private fun read(args: JsonObject, emit: Emitter) {
         ensureIdle()
         val characteristic = characteristic(args)
@@ -343,6 +374,8 @@ class BluetoothHardware(
         val withResponse = bool(args, "withResponse", true)
         val property = if (withResponse) BluetoothGattCharacteristic.PROPERTY_WRITE else BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
         if (characteristic.properties and property == 0) throw InputError("This characteristic does not support the requested write mode.")
+        // A write without response must fit one ATT packet; Android would otherwise truncate it silently.
+        if (!withResponse && value.size > attMtu - 3) throw InputError("A write without response can carry at most ${attMtu - 3} bytes on this connection.")
         val mode = if (withResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         begin("write", emit, 10_000, key(characteristic))
         val accepted = if (Build.VERSION.SDK_INT >= 33) gatt!!.writeCharacteristic(characteristic, value, mode) == BluetoothStatusCodes.SUCCESS
@@ -371,12 +404,26 @@ class BluetoothHardware(
         }
     }
 
+    /**
+     * Paces each characteristic separately, so one chatty characteristic cannot starve the others.
+     * Values arriving inside the interval replace each other, and the newest is delivered when the
+     * interval ends, so the last value of a burst is never lost. Runs on [worker].
+     */
     private fun notification(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
-        val emit = subscriptions[key(characteristic)] ?: return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastNotification < 100) return
-        lastNotification = now
-        send(emit, "value", valueJson(bytes.take(MAX_GATT_BYTES).toByteArray(), characteristic, true, bytes.size > MAX_GATT_BYTES))
+        val key = key(characteristic)
+        val emit = subscriptions[key] ?: return
+        val value = valueJson(bytes.take(MAX_GATT_BYTES).toByteArray(), characteristic, true, bytes.size > MAX_GATT_BYTES)
+        val epoch = connectionEpoch
+        val deliver = Runnable {
+            trailingNotification.remove(key)
+            if (closed.get() || connectionEpoch != epoch || subscriptions[key] !== emit) return@Runnable
+            lastNotification[key] = SystemClock.elapsedRealtime()
+            send(emit, "value", value)
+        }
+        trailingNotification.remove(key)?.let(worker::removeCallbacks)
+        val wait = NOTIFICATION_INTERVAL_MS - (SystemClock.elapsedRealtime() - (lastNotification[key] ?: Long.MIN_VALUE / 2))
+        if (wait <= 0) deliver.run()
+        else { trailingNotification[key] = deliver; worker.postDelayed(deliver, wait) }
     }
 
     private fun characteristic(args: JsonObject): BluetoothGattCharacteristic {
@@ -509,7 +556,8 @@ class BluetoothHardware(
     private fun resetConnection() {
         connectionEpoch++
         clearPending()
-        subscriptions.clear(); servicesReady = false; lastNotification = 0
+        subscriptions.clear(); servicesReady = false; discoveryStarted = false; attMtu = DEFAULT_MTU
+        trailingNotification.values.forEach(worker::removeCallbacks); trailingNotification.clear(); lastNotification.clear()
         val oldGatt = gatt; gatt = null
         runCatching { oldGatt?.disconnect() }; runCatching { oldGatt?.close() }
         val oldSocket = socket; socket = null
@@ -537,6 +585,7 @@ class BluetoothHardware(
             }) }
         })
         addProperty("truncated", truncated)
+        addProperty("mtu", attMtu); addProperty("maxWriteWithoutResponse", attMtu - 3)
     }
 
     private fun deviceJson(candidate: Candidate) = obj {
@@ -620,6 +669,10 @@ class BluetoothHardware(
     companion object {
         private const val MAX_CHOICES = 48
         private const val MAX_GATT_BYTES = 512
+        private const val DEFAULT_MTU = 23
+        private const val REQUESTED_MTU = 517 // 512-byte attribute value + 5 bytes ATT overhead.
+        private const val MTU_FALLBACK_MS = 5000L // Leaves 10s of the 15s connect budget for discovery.
+        private const val NOTIFICATION_INTERVAL_MS = 100L
         private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }

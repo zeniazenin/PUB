@@ -60,7 +60,7 @@ fun NativeRenderer(node: JsonObject, onAction: (String) -> Unit, onInput: (Strin
                     else -> MaterialTheme.typography.bodyMedium
                 }, color = if (style == "eyebrow") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
         }
-        "input" -> OutlinedTextField(value = node["value"].asString, onValueChange = { onInput(node["action"].asString, it.take(2000)) }, label = { Text(node["label"].asString) }, modifier = Modifier.fillMaxWidth())
+        "input" -> ScriptTextField(node["action"].asString, node["value"].asString, node["label"].asString, onInput)
         "button" -> Button(onClick = { onAction(node["action"].asString) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
             Text(node["label"].asString)
         }
@@ -98,4 +98,30 @@ fun NativeRenderer(node: JsonObject, onAction: (String) -> Unit, onInput: (Strin
             }
         }
     }
+}
+
+/**
+ * The script's reply to each keystroke arrives asynchronously from the isolated runtime and may echo an
+ * older value. Binding the field straight to the script value reverted characters and moved the cursor
+ * while replies were in flight, and a script that did not echo made the field impossible to type into.
+ * The field therefore owns its text; a script value is adopted only when it is not an echo of what the
+ * user typed (for example, the script clears or reformats the field).
+ */
+@Composable
+private fun ScriptTextField(action: String, scriptValue: String, label: String, onInput: (String, String) -> Unit) {
+    var text by remember(action) { mutableStateOf(scriptValue) }
+    val sent = remember(action) { ArrayDeque<String>() }
+    LaunchedEffect(action, scriptValue) {
+        val echo = sent.indexOf(scriptValue)
+        if (echo >= 0) repeat(echo + 1) { sent.removeFirst() }
+        else { sent.clear(); text = scriptValue }
+    }
+    OutlinedTextField(value = text, onValueChange = { value ->
+        val next = value.take(2000)
+        if (next != text) {
+            text = next
+            sent.addLast(next); if (sent.size > 64) sent.removeFirst()
+            onInput(action, next)
+        }
+    }, label = { Text(label) }, modifier = Modifier.fillMaxWidth())
 }

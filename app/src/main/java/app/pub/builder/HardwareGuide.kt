@@ -40,9 +40,9 @@ object HardwareGuide {
 
         bluetooth: choose {scanMs?:1000..10000,bondedOnly?:boolean} opens host device picker after bounded discovery.
         device event returns opaque session id,name,paired,transport. Never invent or pass MAC addresses.
-        connect {} connects the chosen BLE device and returns services with service/characteristic UUIDs and properties.
-        read {service:UUID,characteristic:UUID}; write {service,characteristic,data:[bytes0..255],withResponse?:boolean}; max512 bytes.
-        subscribe {service,characteristic,enabled?:boolean}; value event data has bytes,service,characteristic,notification.
+        connect {} connects the chosen BLE device and returns services with service/characteristic UUIDs and properties, plus mtu and maxWriteWithoutResponse.
+        read {service:UUID,characteristic:UUID}; write {service,characteristic,data:[bytes0..255],withResponse?:boolean}; max512 bytes; withResponse:false max maxWriteWithoutResponse bytes.
+        subscribe {service,characteristic,enabled?:boolean}; value event data has bytes,service,characteristic,notification. Notifications: max10/s per characteristic, newest value kept.
         disconnect {}; classicConnect {service:UUID} uses secure RFCOMM on a chosen paired device;
         classicWrite {data:[bytes]} max4096; classicRead {maxBytes?:1..4096,timeoutMs?:1000..10000}.
         UUID accepts canonical UUID or 4/8 hex shorthand. Know the accessory protocol; discovering a device does not reveal its command semantics.

@@ -27,7 +27,12 @@ class ChatGptAuth(context: Context) {
     private val hostId = prefs.getString("id", null) ?: "urn:uuid:${UUID.randomUUID()}".also { prefs.edit().putString("id", it).commit() }
     private val http = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
         .callTimeout(180, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build()
+    // Streamed generation/review: callTimeout covers the whole stream, and reasoning models can be silent
+    // for long stretches. newBuilder shares the dispatcher, so cancel() still aborts these calls.
+    private val streamHttp = http.newBuilder().readTimeout(STREAM_READ_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(STREAM_CALL_SECONDS, TimeUnit.SECONDS).build()
     @Volatile private var listener: ServerSocket? = null
+    @Volatile private var generateCall: Call? = null
     @Volatile private var imageCall: Call? = null
     @Volatile private var reviewCall: Call? = null
     @Volatile private var cancelled = false
@@ -35,7 +40,7 @@ class ChatGptAuth(context: Context) {
     @Volatile private var session: JsonObject? = vault.read()?.let { runCatching { JsonParser.parseString(it).asJsonObject }.getOrNull() }
     fun imageToolsUnavailable(): Boolean = prefs.getBoolean("image-tools-blocked", false)
     fun accountLabel(): String? = session?.get("email")?.asString
-    fun cancel() { cancelled = true; runCatching { listener?.close() }; imageCall?.cancel(); reviewCall?.cancel(); http.dispatcher.cancelAll() }
+    fun cancel() { cancelled = true; runCatching { listener?.close() }; generateCall?.cancel(); imageCall?.cancel(); reviewCall?.cancel(); http.dispatcher.cancelAll() }
     private fun checkActive() { check(!cancelled && !Thread.currentThread().isInterrupted) { "Operation cancelled" } }
     fun prepare() { cancelled = false }
 
@@ -86,6 +91,7 @@ class ChatGptAuth(context: Context) {
                 if(existing!=null) check(identity.subject==existing["subject"].asString) { "Sign-in returned a different account" }
                 tokens.addProperty("client_id",client);tokens.addProperty("subject",identity.subject)
                 tokens.addProperty("email",identity.getStringClaim("email") ?: "ChatGPT account")
+                checkActive() // Cancelling sign-in discards the new tokens.
                 persist(tokens)
                 prefs.edit().remove("image-tools-blocked").apply()
             } finally { listener=null }
@@ -94,23 +100,29 @@ class ChatGptAuth(context: Context) {
     private fun verifyIdentity(token: String, client: String, nonce: String): com.nimbusds.jwt.JWTClaimsSet {
         return app.pub.core.IdentityVerifier.verify(token, get("$ISSUER/.well-known/jwks.json"), client, nonce, System.currentTimeMillis())
     }
-    private fun persist(tokens: JsonObject) {
-        checkActive()
-        check(tokens["token_type"].asString.equals("Bearer",true)) { "Unsupported token type" }
-        val scopes=tokens["scope"].asString.split(' ').toSet()
+    private fun validated(tokens: JsonObject): JsonObject {
+        check(tokens["token_type"]?.asString.equals("Bearer",true)) { "Unsupported token type" }
+        val scopes=tokens["scope"]?.asString.orEmpty().split(' ').toSet()
         check(scopes.containsAll(setOf("chatgpt.tokens.use.direct","resource.invoke"))) { "ChatGPT plan usage was not granted. Reconnect and enable plan usage." }
-        check(tokens["access_token"].asString.isNotBlank() && tokens["refresh_token"].asString.isNotBlank())
-        tokens.addProperty("expires_at", System.currentTimeMillis()+tokens["expires_in"].asLong.coerceIn(1,86400)*1000)
-        vault.write(tokens.toString()); session=tokens
+        check(tokens["access_token"]?.asString.orEmpty().isNotBlank() && tokens["refresh_token"]?.asString.orEmpty().isNotBlank()) { "ChatGPT returned an incomplete session. Sign in again." }
+        val lifetime=tokens["expires_in"]?.asLong ?: error("ChatGPT returned an incomplete session. Sign in again.")
+        tokens.addProperty("expires_at", System.currentTimeMillis()+lifetime.coerceIn(1,86400)*1000)
+        return tokens
     }
+    private fun persist(tokens: JsonObject) { vault.write(validated(tokens).toString()); session=tokens }
     private fun accessToken(): String {
         checkActive()
         val old=session ?: error("Connect ChatGPT first")
         if(old["expires_at"].asLong <= System.currentTimeMillis()+30_000) {
             val refreshed=form("$ISSUER/api/accounts/oauth/token",mapOf("grant_type" to "refresh_token","client_id" to old["client_id"].asString,"refresh_token" to old["refresh_token"].asString,"resource" to RESOURCE))
-            for(key in listOf("client_id","subject","email","id_token","scope")) if(!refreshed.has(key)) refreshed.add(key,old[key])
+            // A response may omit refresh_token (RFC 6749 §6); the current one then stays valid.
+            for(key in listOf("client_id","subject","email","id_token","scope","refresh_token")) if(!refreshed.has(key)) refreshed.add(key,old[key])
             // The original validated identity is retained; refreshed ID tokens are hints only.
-            persist(refreshed)
+            validated(refreshed)
+            // The server may have rotated the refresh token. Keep it in memory even if cancel() lands now or
+            // storage fails, so this process never falls back to the revoked one; then make it durable.
+            session=refreshed
+            vault.write(refreshed.toString())
         }
         return session!!["access_token"].asString
     }
@@ -129,19 +141,26 @@ class ChatGptAuth(context: Context) {
         }
         val request=Request.Builder().url("$RESOURCE/responses").header("Authorization","Bearer ${accessToken()}")
             .header("Accept","text/event-stream").post(body.toString().toRequestBody("application/json".toMediaType())).build()
-        http.newCall(request).execute().use { response ->
-            checkHttp(response)
-            val source=response.body!!.source();val output=app.pub.core.GenerationOutput();var total=0L
-            while(!source.exhausted()) {
-                checkActive()
-                val line=source.readUtf8LineStrict(1_000_000);total+=line.length
-                check(total<=4_000_000) { "Generation response exceeded limit" }
-                if(!line.startsWith("data:")) continue
-                val payload=line.removePrefix("data:").trim();if(payload=="[DONE]") break
-                if(output.accept(payload)) break
+        val call=streamHttp.newCall(request)
+        generateCall=call
+        try {
+            // Covers cancellation immediately before execute(), before the dispatcher registers the call,
+            // so a cancelled build never sends the paid request.
+            checkActive()
+            call.execute().use { response ->
+                checkHttp(response)
+                val source=response.body!!.source();val output=app.pub.core.GenerationOutput();var total=0L
+                while(!source.exhausted()) {
+                    checkActive()
+                    val line=source.readUtf8LineStrict(1_000_000);total+=line.length
+                    check(total<=4_000_000) { "Generation response exceeded limit" }
+                    if(!line.startsWith("data:")) continue
+                    val payload=line.removePrefix("data:").trim();if(payload=="[DONE]") break
+                    if(output.accept(payload)) break
+                }
+                return output.finish()
             }
-            return output.finish()
-        }
+        } finally { generateCall=null }
     }
     /** Uses the existing ChatGPT-authorized resource; account/tool eligibility is checked by OpenAI. */
     @Synchronized fun generateImage(model: String, prompt: String): String {
@@ -224,7 +243,7 @@ class ChatGptAuth(context: Context) {
         }
         val httpRequest = Request.Builder().url("$RESOURCE/responses").header("Authorization", "Bearer ${accessToken()}")
             .header("Accept", "text/event-stream").post(body.toString().toRequestBody("application/json".toMediaType())).build()
-        val call = http.newCall(httpRequest)
+        val call = streamHttp.newCall(httpRequest)
         reviewCall = call
         try {
             checkActive()
@@ -305,6 +324,9 @@ class ChatGptAuth(context: Context) {
     }
     companion object {
         private const val ISSUER="https://auth.openai.com";private const val RESOURCE="https://api.openai.com/v1"
+        /** Longest silent gap allowed in a streamed response, and total budget for one streamed call. */
+        private const val STREAM_READ_SECONDS = 300L
+        private const val STREAM_CALL_SECONDS = 900L
         const val MAX_PREVIEW_PNG_BYTES = 4 * 1024 * 1024
         const val MAX_PREVIEW_DIMENSION = 4096
         const val MAX_PREVIEW_PIXELS = 8_000_000L

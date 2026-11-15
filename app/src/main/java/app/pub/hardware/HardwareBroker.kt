@@ -109,7 +109,7 @@ class HardwareBroker(
             if(!userAction) { error(request,"gesture_required","Start hardware access from a button."); return }
             pending=request.deepCopy(); prompt(HardwarePrompt(cap,op)); return
         }
-        execute(request)
+        execute(request,userAction)
     }
     fun consent(allow: Boolean, always: Boolean) {
         val r=pending ?: return
@@ -119,21 +119,26 @@ class HardwareBroker(
         val cap=r["capability"].asString
         grants.add(cap)
         if(always && !preview) { prefs.edit().putString("$projectId.$cap",Rule.ALLOW.name).apply(); changed() }
-        execute(r)
+        execute(r,userAction=true) // The user just answered the host consent dialog.
     }
     fun androidResult() {
         val r=pending ?: return
         pending=null; requestAndroid(null)
         if(!closed && foreground()) {
-            if(permissions(r).all(::granted)) execute(r)
+            if(permissions(r).all(::granted)) execute(r,userAction=true)
             else error(r,"android_permission","Android permission was not granted. Review Settings → Android app permissions.")
         }
     }
-    private fun execute(r: JsonObject) {
+    private fun execute(r: JsonObject, userAction: Boolean) {
         val cap=r["capability"].asString; val op=r["operation"].asString
         if(!allowed(cap)) { error(r,"revoked","Access ended."); return }
         val needed=permissions(r)
-        if(needed.any { !granted(it) }) { pending=r; requestAndroid(needed); return }
+        if(needed.any { !granted(it) }) {
+            // An already-active capability can still need a new Android permission (for example audio
+            // devices needing Nearby devices). That system prompt must also start from a button.
+            if(!userAction) { error(r,"gesture_required","Use a button to allow the Android permission this needs."); return }
+            pending=r; requestAndroid(needed); return
+        }
         val interactive=op in setOf("choose","capture","route") || cap=="nfc"
         if(interactive && nativeRequest!=null) {error(r,"busy","Finish the open hardware screen first.");return}
         val nativeToken=if(interactive) Any() else null

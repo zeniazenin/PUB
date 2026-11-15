@@ -52,7 +52,12 @@ class MainActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent:Intent) {super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("open_builder",false)) openBuildSignal++}
     override fun onStart() { super.onStart(); model.setVisible(true); builder.setVisible(true) }
-    override fun onStop() { model.setVisible(false); builder.setVisible(false); super.onStop() }
+    override fun onStop() {
+        // A configuration change (rotation, resize, theme) recreates the Activity while the ViewModels and
+        // the user's session continue; only a real stop ends hardware sessions and the foreground state.
+        if (!isChangingConfigurations) { model.setVisible(false); builder.setVisible(false) }
+        super.onStop()
+    }
 }
 
 @Composable

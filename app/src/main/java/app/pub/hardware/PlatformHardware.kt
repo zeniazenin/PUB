@@ -150,17 +150,15 @@ class PlatformHardware(
                     emit("error", error("limit", "At most four sensors can run at once.")); return
                 }
                 stopSensor(name)
-                val intervalNanos = (1_000_000_000.0 / rate).toLong()
-                var lastEvent = 0L
+                // Paced on the sensor's own timestamps, so delivery stays at rateHz despite hardware jitter.
+                val pacer = app.pub.core.RatePacer((1_000_000_000.0 / rate).toLong())
                 val listener = object : SensorEventListener {
                     override fun onSensorChanged(event: SensorEvent) {
                         if (closed || sensorStreams[name]?.listener !== this) return
                         if (name.startsWith("step_") && !hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)) {
                             stopSensor(name); emit("error", error("permission_denied", "Activity recognition access ended.")); return
                         }
-                        val now = SystemClock.elapsedRealtimeNanos()
-                        if (now - lastEvent < intervalNanos || event.values.take(6).any { !it.isFinite() }) return
-                        lastEvent = now
+                        if (event.values.take(6).any { !it.isFinite() } || !pacer.accept(event.timestamp)) return
                         emit("sensor", JsonObject().apply {
                             addProperty("sensor", name); addProperty("unit", spec.unit)
                             addProperty("timestampNs", event.timestamp); addProperty("accuracy", event.accuracy)
@@ -228,14 +226,14 @@ class PlatformHardware(
                 else emitLocation(location, fineAtStart, emit)
             }
         } else {
-            var lastEmissionMs = -interval
+            val pacer = app.pub.core.RatePacer(interval)
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     if (closed || generation != locationGeneration || locationListener !== this) return
                     if (!hasLocationPermission()) { stopLocation(); emit("error", error("permission_denied", "Location permission was revoked.")); return }
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - lastEmissionMs < interval) return
-                    lastEmissionMs = now; emitLocation(location, fineAtStart, emit)
+                    // A fix a few ms early must not be dropped (that would halve the update rate).
+                    if (!pacer.accept(SystemClock.elapsedRealtime())) return
+                    emitLocation(location, fineAtStart, emit)
                 }
                 override fun onProviderDisabled(disabledProvider: String) {
                     if (!closed && generation == locationGeneration && disabledProvider == provider) {

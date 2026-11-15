@@ -10,7 +10,6 @@ import android.os.Looper
 import android.os.Process
 import app.pub.core.UiPacket
 import com.google.gson.JsonObject
-import java.util.ArrayDeque
 import java.util.UUID
 
 /** One authenticated Binder connection belongs to one host-selected project session. */
@@ -30,7 +29,8 @@ class RuntimeClient(
     var responseIsUserAction = false; private set
     private var sequence = 0L
     private var source = ""
-    private val pending = ArrayDeque<String>()
+    private class Queued(val json: String, val userAction: Boolean, val key: String?)
+    private val pending = ArrayDeque<Queued>()
     private val responseDeadline = Runnable { fail("Runtime did not respond. Restart the project.") }
     private val callback = object : IRuntimeCallback.Stub() {
         override fun onReady(uid: Int) { main.post {
@@ -68,21 +68,40 @@ class RuntimeClient(
         if (!bound) fail("Cannot start isolated service")
         else main.postDelayed(responseDeadline, 10_000)
     }
-    fun send(event: JsonObject, disposable: Boolean = false) {
+    /**
+     * Queues [event] for the runtime.
+     * - [disposable]: dropped instead of queued while the runtime is busy (high-rate frames such as pitch).
+     * - [key]: only the newest pending event per key is kept, in the slot of the one it replaces, so a
+     *   continuous stream (sensor values, text typed into one field) takes at most one queue slot and
+     *   cannot exhaust the queue. A pending event is never replaced across a later queued user action,
+     *   so the script still sees exactly the state each action applied to.
+     */
+    fun send(event: JsonObject, disposable: Boolean = false, key: String? = null) {
         if (closed) return
         if (disposable && (busy || !ready || pending.isNotEmpty())) return
+        val item = Queued(event.toString(), event["type"]?.asString == "action", key)
+        if (key != null) {
+            val index = pending.indexOfLast { it.key == key }
+            if (index >= 0 && (index + 1 until pending.size).none { pending[it].userAction }) {
+                pending[index] = item
+                drain()
+                return
+            }
+        }
         if (pending.size >= 16) { fail("Too many queued project events"); return }
-        pending.add(event.toString())
+        pending.add(item)
         drain()
     }
+    /** Drops queued events whose key starts with [prefix], such as hardware data invalidated by a stop. */
+    fun discard(prefix: String) { pending.removeAll { it.key?.startsWith(prefix) == true } }
     private fun drain() {
         if (!ready || busy || closed || pending.isEmpty()) return
         busy = true
         sequence++
         main.postDelayed(responseDeadline, 3000)
         val next = pending.removeFirst()
-        responseIsUserAction = com.google.gson.JsonParser.parseString(next).asJsonObject["type"]?.asString == "action"
-        runCatching { remote?.dispatch(sequence, next) }.onFailure { fail("Runtime disconnected") }
+        responseIsUserAction = next.userAction
+        runCatching { remote?.dispatch(sequence, next.json) }.onFailure { fail("Runtime disconnected") }
     }
     private fun fail(message: String) {
         if (closed) return

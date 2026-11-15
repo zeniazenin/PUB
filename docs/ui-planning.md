@@ -28,7 +28,7 @@ Its instructions ask for a best-in-class interface within those limits:
 - **Navigation:** one screen per task, with a consistent way back.
 - **Inputs:** the right input for each kind of data (multiline, numeric keyboards, choices, dictation).
 - **States and feedback:** empty, loading, error, validation and success states, and feedback after every action, with confirmation before anything destructive.
-- **Content:** compact lists, exact wording and accessible labels.
+- **Content:** compact lists, exact wording and accessible labels. The app's name is never repeated as a heading, since PUB's title bar already shows it, and nothing is shown twice in one place.
 - **Limits:** no component, gesture or navigation that PUB does not have.
 
 The answer is a `UiPlan` (core), strict and bounded:

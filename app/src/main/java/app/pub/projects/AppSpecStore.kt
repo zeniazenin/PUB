@@ -7,7 +7,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
-import java.util.UUID
 
 /** Safe error text for callers; the underlying cause and file content are never incorporated into the message. */
 class AppSpecStoreException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
@@ -68,9 +67,9 @@ class AppSpecStore(context: Context) {
         }
     }
 
-    /** Host-assigned app IDs only (the bundled tuner or a canonical UUID), so an ID can never become another path. */
+    /** Host-assigned app IDs only ([ProjectStore.isAppId]), so an ID can never become another path. */
     private fun fileFor(id: String): AtomicFile {
-        require(id == "guitar-tuner" || runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)) { "Unknown app" }
+        require(ProjectStore.isAppId(id)) { "Unknown app" }
         return AtomicFile(File(root, "$id.json"))
     }
 

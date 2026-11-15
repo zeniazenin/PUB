@@ -4,7 +4,7 @@ Implemented November 5, 2026 in `C:\Projects\PUB_app`.
 
 ## Behavior
 
-- Initial launch shows an adaptive icon grid for the bundled tuner and saved projects. The host does not start an isolated runtime until an icon or Preview is selected.
+- Initial launch shows an adaptive icon grid for the bundled tuner and saved projects. The host does not start an isolated runtime until an icon or Preview is selected. (Current builds no longer bundle the tuner; it was a development fixture. Apps saved from it keep working. A new install now starts with the sample Tip Calculator instead.)
 - Projects occupy the app content area, with a host-owned pinned **✕ Close** control. Android Back closes the project too. Closing shuts down the runtime, stops capture, clears pending permission requests and session grants, and returns to the launcher. Unsaved previews return to the builder with temporary preview data discarded.
 - **Settings** is at the upper right of the launcher and builder. It contains ChatGPT connection management, model selection, Style, global/per-app microphone Access, saved-app deletion and context review. Permission edits never require running a project.
 - **Create app → Speak your idea** invokes Android's speech-recognition activity. Recognized text is appended to the editable description (maximum 8,000 UTF-16 characters), preserving typed content. Recognition does not submit a generation request. Cancellation preserves the draft, and a newly applied global microphone block rejects a pending result.

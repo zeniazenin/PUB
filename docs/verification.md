@@ -13,6 +13,8 @@ Verified November 4, 2026, on Samsung SM-S948U, Android 17/API 37.
 
 ## Prior tuner milestone evidence
 
+Current builds no longer bundle the tuner; it was a development fixture. Apps saved from it keep working.
+
 PUB 0.2.0 passed the physical microphone capture/revocation/background test after the phone was unlocked. The full four-test Android suite passed in 4.191 seconds. The Build tab was opened and its ChatGPT sign-in button verified through the native UI hierarchy. All original JVM tuner/pitch tests still pass. Synthetic pitch tests cover 42 frequency/detuning/sample-rate combinations and additional harmonic/noise cases; this does not establish acoustic guitar accuracy.
 
 ## Live ChatGPT generation verified

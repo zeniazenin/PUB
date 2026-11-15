@@ -5,12 +5,31 @@ import org.junit.Test;
 import java.nio.file.*;
 import static org.junit.Assert.*;
 
+/**
+ * The tuner device-test fixture (PUB no longer ships a tuner). It is read from the test APK's assets, shared with the
+ * androidTest suites that need a microphone app, and modeled on an app saved from the former built-in tuner.
+ */
 public class TunerProjectTest {
+    private static final Path FIXTURE = Path.of("app/src/androidTest/assets/fixtures/tuner");
     private ScriptEngine tuner() throws Exception {
         ScriptEngine engine = new ScriptEngine();
-        engine.load(Files.readString(Path.of("app/src/main/assets/projects/guitar-tuner/main.js")));
+        engine.load(Files.readString(FIXTURE.resolve("main.js")));
         UiPacket.parse(engine.dispatch("{\"type\":\"init\"}"));
         return engine;
+    }
+    /** The same package the device tests' TunerFixture saves, so an invalid fixture fails here first. */
+    @Test public void fixtureIsAValidPackageWithItsGraphic() throws Exception {
+        JsonObject root = new JsonObject();
+        root.addProperty("name", "Guitar Tuner"); root.addProperty("description", "Device test fixture: offline guitar tuner");
+        root.addProperty("source", Files.readString(FIXTURE.resolve("main.js")));
+        root.add("assets", JsonParser.parseString(Files.readString(FIXTURE.resolve("graphics.json"))).getAsJsonObject());
+        root.addProperty("icon", "guitar");
+        JsonArray capabilities = new JsonArray(); capabilities.add("microphone.pitch"); capabilities.add("storage.project");
+        root.add("capabilities", capabilities);
+        ProjectBundle bundle = ProjectBundle.parse(root.toString());
+        bundle.requireReadyAssets();
+        assertTrue(bundle.assets.has("guitar"));
+        assertTrue(tuner().dispatch("{\"type\":\"init\",\"settings\":{},\"storage\":{}}").contains("GUITAR TUNER"));
     }
     @Test public void microphoneAccessIsAnEffectNotASideEffect() throws Exception {
         ScriptEngine engine=tuner();
@@ -50,10 +69,16 @@ public class TunerProjectTest {
         packet=UiPacket.parse(engine.dispatch("{\"type\":\"status\",\"listening\":false,\"message\":\"Stopped\"}"));
         assertEquals(0,packet.ui.getAsJsonArray("children").get(2).getAsJsonObject().getAsJsonArray("highlight").size());
     }
-    @Test public void settingsRestoreAndProducePersistenceEffects() throws Exception {
+    @Test public void legacySettingsRestoreAndChangesPersistThroughStorage() throws Exception {
         ScriptEngine engine=tuner();
-        assertTrue(engine.dispatch("{\"type\":\"init\",\"settings\":{\"dropD\":true,\"reference\":442}}").contains("442 Hz"));
+        assertTrue(engine.dispatch("{\"type\":\"init\",\"settings\":{\"dropD\":true,\"reference\":442},\"storage\":{}}").contains("442 Hz"));
         UiPacket p=UiPacket.parse(engine.dispatch("{\"type\":\"action\",\"action\":\"refUp\"}"));
-        assertEquals(443,p.effects.get(0).getAsJsonObject().get("reference").getAsInt());
+        JsonObject effect=p.effects.get(0).getAsJsonObject();
+        assertEquals("storage.save",effect.get("type").getAsString());
+        assertEquals(443,effect.getAsJsonObject("data").get("reference").getAsInt());
+        assertTrue(effect.getAsJsonObject("data").get("dropD").getAsBoolean());
+        // Saved storage takes precedence over the legacy settings.
+        String restored=engine.dispatch("{\"type\":\"init\",\"settings\":{\"dropD\":true,\"reference\":442},\"storage\":{\"dropD\":false,\"reference\":445}}");
+        assertTrue(restored.contains("445 Hz")); assertTrue(restored.contains("E2"));
     }
 }

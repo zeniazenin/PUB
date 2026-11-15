@@ -14,7 +14,7 @@ import app.pub.core.PitchDetector
 /** The host owns identity and grants. The script can request, never authorize, capture. */
 class PermissionBroker(
     private val context: Context,
-    private val projectId: () -> String = { "guitar-tuner" },
+    private val projectId: () -> String,
     private val prepareInput: ((android.media.AudioDeviceInfo?) -> Unit, (String) -> Unit) -> Unit = { ready, _ -> ready(null) },
     private val declared: () -> Boolean,
     private val requestUser: () -> Unit,

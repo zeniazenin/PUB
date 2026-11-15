@@ -21,12 +21,12 @@ import app.pub.core.UiPacket
 import app.pub.core.ProjectBundle
 import app.pub.projects.AppSpecStore
 import app.pub.projects.ProjectStore
+import app.pub.projects.SampleApps
 import app.pub.projects.SavedProject
 import app.pub.permissions.PermissionBroker
 import app.pub.runtime.RuntimeClient
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import java.io.File
 
 class HostModel(application: Application) : AndroidViewModel(application) {
     @SuppressLint("StaticFieldLeak") // Application context only; never retains an Activity.
@@ -44,39 +44,23 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     private fun refreshProjects() {
         val epoch = ++projectsEpoch
         viewModelScope.launch {
-            val loaded = runCatching { withContext(Dispatchers.IO) { store.list().filter { it.id != "guitar-tuner" } } }.getOrNull() ?: return@launch
+            val loaded = runCatching { withContext(Dispatchers.IO) { listLibrary() } }.getOrNull() ?: return@launch
             if (epoch == projectsEpoch) { projects = loaded; syncPolicies() }
         }
     }
-    var tunerVisible by mutableStateOf(!prefs.getBoolean("tuner.deleted", false)); private set
+    /**
+     * Every library listing, off the main thread. A new install's sample app is saved first (once per install, see
+     * [SampleApps]), so the first listing already includes it; a seeding failure is skipped and never blocks it.
+     */
+    private fun listLibrary(): List<SavedProject> {
+        SampleApps.seedIfNeeded(context, store)
+        return store.list()
+    }
     var previewHistoryId: String? = null; private set
     fun graphicAsset(id: String): JsonObject? = selectedBundle?.assets?.get(id)?.asJsonObject
     var previewEditTarget by mutableStateOf<SavedProject?>(null); private set
-    private var originalTuner: SavedProject? = null
-    // The launcher asks for the tuner on every composition. Cache its stored override (an edited tuner)
-    // instead of rereading and reparsing the file each time; saves and deletes update the cache.
-    private var tunerOverride: SavedProject? = null
-    private var tunerOverrideLoaded = false
-    fun editableProject(id: String): SavedProject {
-        if (id == "guitar-tuner") {
-            if (!tunerOverrideLoaded) { tunerOverride = store.read(id); tunerOverrideLoaded = true }
-            tunerOverride?.let { return it }
-        }
-        return storedProject(id)
-    }
     /** Reads the current stored package from disk (no cache); safe to call off the main thread. */
-    private fun storedProject(id: String): SavedProject {
-        store.read(id)?.let { return it }
-        check(id == "guitar-tuner" && tunerVisible) { "App is no longer available" }
-        originalTuner?.let { return it }
-        return SavedProject(id, ProjectBundle.parse(JsonObject().apply {
-            addProperty("name", "Guitar Tuner"); addProperty("description", "Offline guitar tuner with standard and Drop D tuning")
-            addProperty("source", context.assets.open("projects/guitar-tuner/main.js").bufferedReader().use { it.readText() })
-            add("assets", JsonParser.parseString(context.assets.open("projects/guitar-tuner/graphics.json").bufferedReader().use { it.readText() }).asJsonObject)
-            addProperty("icon", "guitar")
-            add("capabilities", com.google.gson.JsonArray().apply { add("microphone.pitch"); add("storage.project") })
-        }.toString())).also { originalTuner = it }
-    }
+    fun editableProject(id: String): SavedProject = checkNotNull(store.read(id)) { "App is no longer available" }
     var projectOpen by mutableStateOf(false)
         private set
     var projectId by mutableStateOf("")
@@ -184,13 +168,13 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         })
 
     init { runCatching {media.cleanupTemporary()};syncPolicies();refreshProjects() }
-    fun openProject(project: SavedProject?) {
-        if (project != null) requireProjectId(project.id)
+    fun openProject(project: SavedProject) {
+        requireProjectId(project.id)
         closeProject()
-        selectedBundle = project?.bundle ?: editableProject("guitar-tuner").bundle
-        projectId = project?.id ?: "guitar-tuner"
-        projectName = selectedBundle?.name ?: "Guitar Tuner"
-        projectDescription = project?.bundle?.description ?: ""
+        selectedBundle = project.bundle
+        projectId = project.id
+        projectName = project.bundle.name
+        projectDescription = project.bundle.description
         preview = false; previewData = JsonObject()
         projectOpen = true
         broker.setForeground(visible)
@@ -243,7 +227,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val result = runCatching { withContext(Dispatchers.IO) {
                 val saved = if (target != null) {
-                    check(storedProject(target.id).bundle.toJson() == target.bundle.toJson()) { "App changed since editing began" }
+                    check(editableProject(target.id).bundle.toJson() == target.bundle.toJson()) { "App changed since editing began" }
                     store.update(target.id, bundle)
                 } else {
                     val created = store.save(bundle)
@@ -258,12 +242,11 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                     }
                     created
                 }
-                saved to store.list().filter { it.id != "guitar-tuner" }
+                saved to listLibrary()
             } }
             savingPreview = false
             result.onSuccess { (saved, library) ->
                 projectsEpoch++; projects = library // Newer than any library read still in flight.
-                if (saved.id == "guitar-tuner") { tunerOverride = saved; tunerOverrideLoaded = true }
                 if (preview && projectId == previewId) openProject(saved) else syncPolicies()
                 onSaved(historyId, saved)
             }.onFailure { if (preview && projectId == previewId) failure = "Could not save project locally" }
@@ -273,14 +256,9 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         runCatching {
             requireProjectId(project.id)
             if (projectId == project.id) closeProject()
-            if (project.id == "guitar-tuner") {
-                check(prefs.edit().putBoolean("tuner.deleted", true).commit())
-                tunerVisible = false
-            }
             store.delete(project.id)
-            // The app's stored research and checks go with it (the bundled tuner starts again without any).
+            // The app's stored research and checks go with it.
             specs.delete(project.id)
-            if (project.id == "guitar-tuner") { tunerOverride = null; tunerOverrideLoaded = true }
             media.delete(project.id)
             permissionPrefs.edit().apply { HardwareContract.OPERATIONS.keys.forEach {remove("${project.id}.$it")} }.apply()
             context.deleteSharedPreferences("project.${project.id}")
@@ -306,30 +284,14 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         hardwareIntent = false
         runtimeStatus = "Starting isolated runtime…"
         try {
-            val sourceText: String
-            if (selectedBundle != null) {
-                capabilities = selectedBundle!!.capabilities
-                sourceText = selectedBundle!!.source
-            } else {
-            val directory = File(context.filesDir, "projects/guitar-tuner").apply { mkdirs() }
-            for (name in listOf("manifest.json", "main.js")) {
-                val file = File(directory, name)
-                if (!file.exists()) context.assets.open("projects/guitar-tuner/$name").use { input -> file.outputStream().use { input.copyTo(it) } }
-            }
-            val manifestFile = File(directory, "manifest.json")
-            require(manifestFile.length() <= 8192) { "Manifest too large" }
-            val manifest = JsonParser.parseString(manifestFile.readText()).asJsonObject
-            require(manifest["runtime"].asString == "pub/1" && manifest["entrypoint"].asString == "main.js") { "Unsupported project runtime" }
-            capabilities = manifest["capabilities"].asJsonArray.map { it.asString }.toSet()
-            require(capabilities.all { it in HardwareContract.CAPABILITIES }) { "Project requires unsupported capabilities" }
-            val source = File(directory, "main.js")
-            require(source.length() <= 65536) { "Script too large" }
-            sourceText = source.readText()
-            }
+            val bundle = checkNotNull(selectedBundle) { "App is no longer available" }
+            capabilities = bundle.capabilities
+            val sourceText = bundle.source
             val client = RuntimeClient(context, onReady = { uid ->
                 isolatedUid = uid
                 runtimeStatus = "Isolated runtime connected"
                 runtime?.send(event("init").apply {
+                    // Legacy dropD/reference preferences, still read at init by apps saved from the former built-in tuner.
                     add("settings", JsonObject().apply { val settings = previewEditTarget?.let { context.getSharedPreferences("project.${it.id}", Context.MODE_PRIVATE) } ?: projectPrefs; addProperty("dropD", settings.getBoolean("dropD", false)); addProperty("reference", settings.getInt("reference", 440)) })
                     add("device", deviceContext())
                     add("storage", if (preview) previewData.deepCopy() else runCatching { JsonParser.parseString(projectPrefs.getString("data", "{}")).asJsonObject }.getOrDefault(JsonObject()))
@@ -359,13 +321,6 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                 }
                 "microphone.start" -> { if (hardwareIntent) { hardwareIntent = false; broker.start() } }
                 "microphone.stop" -> broker.stop()
-                "settings.save" -> {
-                    require(projectId == "guitar-tuner") { "Use storage.save for generated projects" }
-                    require("storage.project" in capabilities) { "Storage capability was not declared" }
-                    val reference = effect["reference"].asInt
-                    require(reference in 430..450)
-                    projectPrefs.edit().putBoolean("dropD", effect["dropD"].asBoolean).putInt("reference", reference).apply()
-                }
                 "storage.save" -> {
                     require("storage.project" in capabilities) { "Storage capability was not declared" }
                     val data = effect.getAsJsonObject("data")
@@ -407,7 +362,8 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         syncPolicies()
     }
     private fun requireProjectId(id: String) {
-        require(id == "guitar-tuner" || (runCatching { java.util.UUID.fromString(id).toString() == id }.getOrDefault(false) && projects.any { it.id == id })) { "Unknown project" }
+        // The legacy tuner ID is valid only for an existing saved package, like any UUID.
+        require(ProjectStore.isAppId(id) && projects.any { it.id == id }) { "Unknown project" }
     }
     fun changeAccent(value: String) {
         require(value in setOf("moss", "blue", "violet"))
@@ -417,7 +373,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     private fun syncPolicies() {
         globalBlocked = broker.globalBlocked; globalDefault = broker.globalDefault
         appRule = if (projectOpen) broker.appRule else Rule.INHERIT
-        projectMicrophoneRules = (listOf("guitar-tuner") + projects.map { it.id }).associateWith { id ->
+        projectMicrophoneRules = projects.map { it.id }.associateWith { id ->
             runCatching { Rule.valueOf(permissionPrefs.getString("$id.microphone", Rule.INHERIT.name)!!) }.getOrDefault(Rule.INHERIT)
         }
     }

@@ -13,7 +13,7 @@ Describe the illustration or icon when building/editing an app. PUB supports:
 
 Example edit request: “Add a native vector schematic of the guitar, with six separate string shapes. Highlight the string inferred from the detected pitch, and clear the highlight on silence or low confidence. Keep the existing tuner controls.”
 
-Existing saved apps need a new edit to use the new drawing component. The shipped tuner includes a graphical example; user-edited tuner code is preserved. Pitch identifies a likely string, not proof of which physical string was plucked when pitches coincide.
+Existing saved apps need a new edit to use the new drawing component. The tuner shipped with this release included a graphical example; user-edited tuner code is preserved. Current builds no longer bundle the tuner; it was a development fixture. Apps saved from it keep working. Pitch identifies a likely string, not proof of which physical string was plucked when pitches coincide.
 
 Assets work offline after saving. Editing reuses unchanged image assets and sends their descriptions, not pixel data. Up to eight assets (including two generated PNGs) are supported per app. Generated images are static; use vectors for highlightable internal parts.
 

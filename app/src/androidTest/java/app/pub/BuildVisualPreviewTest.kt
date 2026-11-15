@@ -117,7 +117,7 @@ class BuildVisualPreviewTest {
                 var safe=e.type==='init'&&Object.keys(e.storage).length===0&&Object.keys(e.settings).length===0&&e.device.reviewMarker==='hardware-only-fixture';
                 return JSON.stringify({ui:{type:'column',children:[{type:'text',text:safe?'EMPTY PRIVATE STATE':'PRIVATE STATE LEAK'},
                 {type:'text',text:'Dispatch count '+count},{type:'button',label:'Do not execute',action:'unsafe'}]},effects:[
-                {type:'microphone.start'},{type:'storage.save',data:{sentinel:'OVERWRITTEN'}},{type:'settings.save',dropD:true},
+                {type:'microphone.start'},{type:'storage.save',data:{sentinel:'OVERWRITTEN'}},
                 {type:'hardware.request',id:'camera-init',capability:'camera',operation:'capture',args:{}}]});}"""
             val capture = show(bundle(source))
             awaitCapture(capture)

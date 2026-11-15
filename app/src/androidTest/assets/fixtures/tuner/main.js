@@ -1,4 +1,5 @@
 "use strict";
+// Device-test fixture modeled on an app saved from the former built-in tuner (PUB no longer ships one).
 // The project owns tuning logic and UI. The host owns hardware and grants.
 var state = { detected: -1, listening: false, dropD: false, manual: -1, hz: 0, cents: 0, note: "--", status: "Ready when you are", reference: 440, confidence: 0 };
 var history = [];
@@ -31,9 +32,11 @@ function render() {
 }
 function dispatch(json) {
   var event = JSON.parse(json), effects = [];
-  if (event.type === "init" && event.settings) {
-    state.dropD = !!event.settings.dropD;
-    state.reference = Math.max(430, Math.min(450, Number(event.settings.reference) || 440));
+  if (event.type === "init") {
+    // Choices saved with storage.save win; otherwise the legacy init.settings preferences apply.
+    var old = event.settings || {}, saved = event.storage || {};
+    state.dropD = !!(saved.dropD !== undefined ? saved.dropD : old.dropD);
+    state.reference = Math.max(430, Math.min(450, Number(saved.reference !== undefined ? saved.reference : old.reference) || 440));
   }
   if (event.type === "action") {
     if (event.action === "start") effects.push({type: "microphone.start"});
@@ -43,7 +46,7 @@ function dispatch(json) {
     if (event.action === "refDown") state.reference = Math.max(430, state.reference - 1);
     if (event.action === "refUp") state.reference = Math.min(450, state.reference + 1);
     if (event.action === "refReset") state.reference = 440;
-    if (["drop", "standard", "refDown", "refUp", "refReset"].indexOf(event.action) >= 0) effects.push({type: "settings.save", dropD: state.dropD, reference: state.reference});
+    if (["drop", "standard", "refDown", "refUp", "refReset"].indexOf(event.action) >= 0) effects.push({type: "storage.save", data: {dropD: state.dropD, reference: state.reference}});
   }
   if (event.type === "status") {
     state.listening = !!event.listening;

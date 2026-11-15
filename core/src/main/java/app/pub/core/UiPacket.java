@@ -9,7 +9,7 @@ public final class UiPacket {
     public final JsonArray effects;
     private static final Set<String> TYPES = Set.of("column", "text", "meter", "choices", "button", "input", "image", "graphic");
     private static final Set<String> GRAPHIC_FIELDS = Set.of("type", "asset", "description", "highlight");
-    private static final Set<String> EFFECTS = Set.of("microphone.start", "microphone.stop", "settings.save", "storage.save", "hardware.request");
+    private static final Set<String> EFFECTS = Set.of("microphone.start", "microphone.stop", "storage.save", "hardware.request");
     private UiPacket(JsonObject ui, JsonArray effects) { this.ui = ui; this.effects = effects; }
     public static UiPacket parse(String input) {
         if (input.length() > ScriptEngine.MAX_MESSAGE) throw new IllegalArgumentException("Packet too large");

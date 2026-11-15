@@ -22,7 +22,7 @@ Successful capture returns `{asset: "UUID.jpg", width, height, lensFacing, lensL
 
 `ProjectMedia(context)` provides:
 
-- `directory(projectId): File`: only the bundled tuner ID, canonical UUID saved IDs, and `preview-UUID` identities are accepted.
+- `directory(projectId): File`: only saved app IDs (canonical UUIDs, or the legacy `guitar-tuner` ID of an app saved from the former built-in tuner) and `preview-UUID` identities are accepted.
 - `resolve(projectId, asset): File?`: rejects traversal, absolute paths, malformed tokens and another project's assets.
 - `copyPreview(fromId, toId)`: copies completed photos under the same opaque tokens before opening the saved app. Writes stage in a separate directory and publish atomically; partial copies are cleaned.
 - `delete(projectId)`: removes only that validated project's photo directory. Call when deleting an app and when discarding a preview.

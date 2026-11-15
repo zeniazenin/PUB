@@ -18,7 +18,7 @@ The isolated process has a watchdog for long-running built-ins and failure conta
 
 ## Audio
 
-YIN estimates the fundamental from 4096-sample windows with 2048-sample hops, using the negotiated sample rate. The detector rejects low levels and low-confidence periodicity. The JavaScript app takes a short median and resets it on large pitch jumps, computes the nearest selected tuning target, and renders cents. Hardware audio processing, room acoustics and input routes still require physical testing.
+YIN estimates the fundamental from 4096-sample windows with 2048-sample hops, using the negotiated sample rate. The detector rejects low levels and low-confidence periodicity. The JavaScript tuner app of this proof took a short median and reset it on large pitch jumps, computed the nearest selected tuning target, and rendered cents. (Current builds no longer bundle the tuner; it was a development fixture. Apps saved from it keep working.) Hardware audio processing, room acoustics and input routes still require physical testing.
 
 ## References
 

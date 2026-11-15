@@ -18,14 +18,13 @@ fun HardwareAccessSettings(host:HostModel,onAndroidSettings:()->Unit) {
     var cap by rememberSaveable {mutableStateOf("microphone")}
     var capsOpen by remember {mutableStateOf(false)}
     var projectsOpen by remember {mutableStateOf(false)}
-    var projectId by rememberSaveable {mutableStateOf("guitar-tuner")}
+    var projectId by rememberSaveable {mutableStateOf("")}
     val groups=linkedMapOf("microphone" to "Microphone") + HardwareInventory.labels
-    val choices=listOf("guitar-tuner" to "Guitar Tuner")+host.projects.map {it.id to it.bundle.name}
-    val selected=choices.find {it.first==projectId} ?: choices.first()
+    val choices=host.projects.map {it.id to it.bundle.name}
+    val selected=choices.find {it.first==projectId} ?: choices.firstOrNull()
     val mic=cap=="microphone"
     val block=if(mic) host.globalBlocked else host.hardwareBlocked(cap)
     val default=if(mic) host.globalDefault else host.hardwareDefault(cap)
-    val own=if(mic) host.microphoneRuleFor(selected.first) else host.hardwareRule(selected.first,cap)
     Text("Access",style=MaterialTheme.typography.titleLarge)
     Box {
         OutlinedButton(onClick={capsOpen=true},modifier=Modifier.fillMaxWidth().testTag("capability-picker")){Text(groups[cap] ?: cap)}
@@ -47,13 +46,17 @@ fun HardwareAccessSettings(host:HostModel,onAndroidSettings:()->Unit) {
         }
     }
     Text("Per-app access",style=MaterialTheme.typography.titleMedium)
-    Box {
-        OutlinedButton(onClick={projectsOpen=true},modifier=Modifier.fillMaxWidth().testTag("project-permission-picker")){Text(selected.second)}
-        DropdownMenu(expanded=projectsOpen,onDismissRequest={projectsOpen=false}) {choices.forEach {(id,name)->DropdownMenuItem(text={Text(name)},onClick={projectId=id;projectsOpen=false})}}
-    }
-    FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-        listOf(Rule.INHERIT to "Use default",Rule.ASK to "Ask",Rule.ALLOW to "Allow",Rule.DENY to "Deny").forEach {(rule,label)->
-            FilterChip(selected=own==rule,onClick={if(mic) host.changeProjectRule(selected.first,rule) else host.changeHardwareRule(selected.first,cap,rule)},label={Text(label)})
+    if(selected==null) Text("No saved apps yet",style=MaterialTheme.typography.bodyMedium)
+    else {
+        val own=if(mic) host.microphoneRuleFor(selected.first) else host.hardwareRule(selected.first,cap)
+        Box {
+            OutlinedButton(onClick={projectsOpen=true},modifier=Modifier.fillMaxWidth().testTag("project-permission-picker")){Text(selected.second)}
+            DropdownMenu(expanded=projectsOpen,onDismissRequest={projectsOpen=false}) {choices.forEach {(id,name)->DropdownMenuItem(text={Text(name)},onClick={projectId=id;projectsOpen=false})}}
+        }
+        FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            listOf(Rule.INHERIT to "Use default",Rule.ASK to "Ask",Rule.ALLOW to "Allow",Rule.DENY to "Deny").forEach {(rule,label)->
+                FilterChip(selected=own==rule,onClick={if(mic) host.changeProjectRule(selected.first,rule) else host.changeHardwareRule(selected.first,cap,rule)},label={Text(label)})
+            }
         }
     }
     Text("Apps must declare the capability. Android permissions and device selection still apply. Changing access stops active hardware sessions.",style=MaterialTheme.typography.bodySmall)

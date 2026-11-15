@@ -6,6 +6,7 @@ import app.pub.core.AppTestSuite
 import app.pub.core.ChecksReport
 import app.pub.core.ProjectBundle
 import app.pub.core.ResearchBrief
+import app.pub.projects.ProjectStore
 import app.pub.projects.SavedProject
 import com.google.gson.*
 import com.google.gson.stream.JsonReader
@@ -151,7 +152,7 @@ class BuildDraftStore(context: Context) {
                 require(value.isJsonObject)
                 val project = value.asJsonObject
                 require(project.keySet() == setOf("id", "bundle"))
-                val id = string(project, "id", 36).also { require(it == "guitar-tuner" || validUuid(it)) }
+                val id = string(project, "id", 36).also { require(ProjectStore.isAppId(it)) }
                 SavedProject(id, bundleOf(project["bundle"]))
             }
         }

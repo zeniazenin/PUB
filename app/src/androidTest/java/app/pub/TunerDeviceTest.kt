@@ -14,6 +14,7 @@ import app.pub.core.PermissionPolicy.Rule as PermissionRule
 @RunWith(AndroidJUnit4::class)
 class TunerDeviceTest {
     @get:Rule val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
+    @get:Rule val tuner = TunerFixtureRule()
 
     @Test fun nativeScreenRendersAndRealMicrophoneStopsOnRevocationAndBackground() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -23,8 +24,9 @@ class TunerDeviceTest {
                 model = ViewModelProvider(it)[HostModel::class.java]
                 assertFalse(model.projectOpen)
                 assertNull(model.isolatedUid)
-                model.openProject(null)
             }
+            TunerFixture.awaitListed(model, tuner.id)
+            scenario.onActivity { model.openProject(tuner.project) }
             fun waitUntil(label: String, condition: () -> Boolean) {
                 val deadline = System.currentTimeMillis() + 15000
                 while (System.currentTimeMillis() < deadline) {
@@ -79,7 +81,7 @@ class TunerDeviceTest {
                 Thread.sleep(350)
                 scenario.onActivity {
                     assertEquals("Closing must invalidate queued frames",framesAtClose,model.pitchFrames)
-                    model.openProject(null)
+                    model.openProject(tuner.project)
                 }
                 waitUntil("reopened tuner") { model.ui != null }
                 scenario.onActivity { model.action("start") }
@@ -89,7 +91,7 @@ class TunerDeviceTest {
                 scenario.onActivity {
                     model.stop()
                     model.blockGlobally(false)
-                    model.changeProjectRule("guitar-tuner",PermissionRule.INHERIT)
+                    model.changeProjectRule(tuner.id,PermissionRule.INHERIT)
                     model.changeGlobalDefault(PermissionRule.ASK)
                 }
             }

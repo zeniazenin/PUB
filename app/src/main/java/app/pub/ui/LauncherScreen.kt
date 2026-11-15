@@ -63,10 +63,6 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(26.dp)
         ) {
-            if (host.tunerVisible) item(key = "guitar-tuner") {
-                val tuner = host.editableProject("guitar-tuner")
-                LauncherTile("guitar-tuner", tuner.bundle.name, tuner = true, graphic = tuner.bundle.icon?.let { tuner.bundle.assets[it]?.asJsonObject }, onEdit = { onEdit(tuner) }, onDelete = { onDelete(tuner) }) { host.openProject(null) }
-            }
             items(host.projects, key = { it.id }) { project ->
                 LauncherTile(project.id, project.bundle.name, graphic = project.bundle.icon?.let { project.bundle.assets[it]?.asJsonObject }, onEdit = { onEdit(project) }, onDelete = { onDelete(project) }) { host.openProject(project) }
             }
@@ -80,7 +76,7 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LauncherTile(id: String, name: String, tuner: Boolean = false, graphic: com.google.gson.JsonObject? = null, onEdit: () -> Unit, onDelete: () -> Unit, onOpen: () -> Unit) {
+private fun LauncherTile(id: String, name: String, graphic: com.google.gson.JsonObject? = null, onEdit: () -> Unit, onDelete: () -> Unit, onOpen: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     val palette = listOf(
@@ -91,6 +87,8 @@ private fun LauncherTile(id: String, name: String, tuner: Boolean = false, graph
     )
     val tint = palette[(id.hashCode() ushr 1) % palette.size]
     val iconBackground = lerp(colors.surface, tint, .15f)
+    // Apps without an icon asset get a glyph chosen from their name, else a monogram.
+    val tuner = name.contains("tuner", ignoreCase = true)
     val calculator = name.contains("calc", ignoreCase = true) || name.contains("tip", ignoreCase = true)
     val words = name.trim().split(Regex("\\s+")).map { word -> word.filter { it.isLetterOrDigit() } }.filter { it.isNotEmpty() }
     val monogram = if (words.size > 1) "${words.first().first()}${words.last().first()}" else words.firstOrNull()?.take(2) ?: "AP"

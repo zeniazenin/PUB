@@ -17,6 +17,8 @@ Every automatic repair and completed review is recorded in that app's constructi
 
 ## Guitar tuner fix
 
+Current builds no longer bundle the tuner; it was a development fixture. Apps saved from it keep working.
+
 The microphone broker previously sent listening=false while preparing the input route. The saved tuner treated this as a stop and cancelled immediately when the broker announced recording. Preparation no longer sends this misleading terminal status; actual denial, failure and stop events remain unchanged. The saved tuner source and preferences were preserved.
 
 ## Context supplied to the builder

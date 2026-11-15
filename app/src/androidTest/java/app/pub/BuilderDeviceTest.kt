@@ -15,6 +15,8 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class BuilderDeviceTest {
+    // A saved app whose permission rule must stay separate from a preview's and a newly saved app's.
+    @get:org.junit.Rule val tuner = TunerFixtureRule()
     private fun bundle(): ProjectBundle {
         val o=JsonObject().apply {
             addProperty("name","Builder test counter");addProperty("description","Test fixture")
@@ -31,8 +33,9 @@ class BuilderDeviceTest {
                 assertFalse(model.projectOpen)
                 assertNull(model.ui)
                 assertNull(model.isolatedUid)
-                model.openProject(null)
             }
+            TunerFixture.awaitListed(model, tuner.id)
+            scenario.onActivity { model.openProject(tuner.project) }
             fun waitFor(check: ()->Boolean) {
                 val end=System.currentTimeMillis()+15000
                 while(System.currentTimeMillis()<end) {
@@ -55,7 +58,7 @@ class BuilderDeviceTest {
             waitFor { model.ui!=null && !model.preview }
             val saved=model.projects.first { it.id==model.projectId }
             try {
-                scenario.onActivity { assertTrue(model.ui.toString().contains("Count 1"));model.openProject(null) }
+                scenario.onActivity { assertTrue(model.ui.toString().contains("Count 1"));model.openProject(tuner.project) }
                 waitFor { model.ui!=null }
                 scenario.onActivity { assertEquals(Rule.DENY,model.appRule);model.openProject(saved) }
                 waitFor { model.ui!=null }
@@ -66,7 +69,7 @@ class BuilderDeviceTest {
                     assertFalse(model.projectOpen)
                     assertNull(model.ui)
                     assertNull(model.isolatedUid)
-                    model.changeProjectRule("guitar-tuner", Rule.INHERIT)
+                    model.changeProjectRule(tuner.id, Rule.INHERIT)
                 }
             }
         }
@@ -74,19 +77,20 @@ class BuilderDeviceTest {
     @Test fun launcherStaysIdleAndClosingDiscardsPreviewState() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             lateinit var model: HostModel
+            scenario.onActivity { model=ViewModelProvider(it)[HostModel::class.java] }
+            TunerFixture.awaitListed(model, tuner.id)
             scenario.onActivity {
-                model=ViewModelProvider(it)[HostModel::class.java]
                 assertFalse(model.projectOpen)
                 assertNull(model.ui)
                 assertNull(model.isolatedUid)
                 model.restart()
-                model.changeProjectRule("guitar-tuner", Rule.DENY)
-                assertEquals(Rule.DENY, model.microphoneRuleFor("guitar-tuner"))
+                model.changeProjectRule(tuner.id, Rule.DENY)
+                assertEquals(Rule.DENY, model.microphoneRuleFor(tuner.id))
                 assertFalse("Changing Settings must not run an app", model.projectOpen)
                 assertNull(model.isolatedUid)
                 assertThrows(IllegalArgumentException::class.java) { model.changeProjectRule("../other-app", Rule.ALLOW) }
                 assertThrows(IllegalArgumentException::class.java) { model.microphoneRuleFor(java.util.UUID.randomUUID().toString()) }
-                model.changeProjectRule("guitar-tuner", Rule.INHERIT)
+                model.changeProjectRule(tuner.id, Rule.INHERIT)
                 model.previewProject(bundle())
             }
             fun waitFor(check: () -> Boolean) {

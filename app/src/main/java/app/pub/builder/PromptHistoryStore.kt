@@ -2,6 +2,7 @@ package app.pub.builder
 
 import android.content.Context
 import android.util.AtomicFile
+import app.pub.projects.ProjectStore
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -226,6 +227,6 @@ class PromptHistoryStore(context: Context) {
         // Per file path, guarded by [lock]: the last validated entries and the file version they came from.
         private val cache = mutableMapOf<String, Pair<FileSignature, List<PromptHistoryEntry>>>()
         private fun validUuid(value: String) = runCatching { UUID.fromString(value).toString() == value }.getOrDefault(false)
-        private fun validProjectId(value: String) = value == "guitar-tuner" || validUuid(value)
+        private fun validProjectId(value: String) = ProjectStore.isAppId(value)
     }
 }

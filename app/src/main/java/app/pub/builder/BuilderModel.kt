@@ -19,8 +19,8 @@ interface BuilderState {
     val editingProject:SavedProject?
     /**
      * The edited app's stored spec (its original request, saved research and behavior checks), read in the
-     * background; null while loading, for a new app and for an app without one (the bundled tuner until its
-     * first saved edit, apps saved before specs existed).
+     * background; null while loading, for a new app and for an app without one (apps saved before specs existed,
+     * until their first saved edit).
      */
     val editingSpec:app.pub.core.AppSpec?
     /** Short notice when the edited app's spec exists but could not be read; edits then research the change only. */

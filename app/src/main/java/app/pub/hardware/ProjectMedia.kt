@@ -17,6 +17,7 @@ import java.io.IOException
 import java.util.UUID
 import kotlin.math.max
 import app.pub.core.JpegPhoto
+import app.pub.projects.ProjectStore
 
 /** Photos belong to a host-selected project. Scripts receive opaque asset names, never paths. */
 class ProjectMedia(context: Context) {
@@ -49,7 +50,7 @@ class ProjectMedia(context: Context) {
                     (entry.name.startsWith(".copy-") && isUuid(entry.name.removePrefix(".copy-")))
                 if (temporaryDirectory && entry.isDirectory) {
                     deleteContainedTree(entry, canonicalRoot)
-                } else if ((isUuid(entry.name) || entry.name == "guitar-tuner") && entry.isDirectory) {
+                } else if (ProjectStore.isAppId(entry.name) && entry.isDirectory) {
                     entry.listFiles().orEmpty().filter { isTemporaryPhoto(it.name) }.forEach { temporary ->
                         if (temporary.canonicalFile == File(entry.canonicalFile, temporary.name) && temporary.isFile) temporary.delete()
                     }
@@ -128,7 +129,7 @@ class ProjectMedia(context: Context) {
         private val ASSET = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jpg")
         private val lock = Any()
         private fun isUuid(id: String) = runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
-        private fun validProjectId(id: String) = id == "guitar-tuner" || isUuid(id) || (id.startsWith("preview-") && isUuid(id.removePrefix("preview-")))
+        private fun validProjectId(id: String) = ProjectStore.isAppId(id) || (id.startsWith("preview-") && isUuid(id.removePrefix("preview-")))
         private fun isTemporaryPhoto(name: String): Boolean =
             (name.startsWith(".capture-") && name.endsWith(".jpg") && isUuid(name.removePrefix(".capture-").removeSuffix(".jpg"))) ||
                 (name.startsWith(".") && name.endsWith(".jpg.pending") && isUuid(name.removePrefix(".").removeSuffix(".jpg.pending")))

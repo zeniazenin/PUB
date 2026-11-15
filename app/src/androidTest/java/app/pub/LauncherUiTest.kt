@@ -11,13 +11,17 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class LauncherUiTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    // Saved before the Activity starts, so the launcher's first library load lists it as an ordinary app.
+    @get:Rule(order = 0) val tuner = TunerFixtureRule()
+    @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun launcherOpensFullscreenAppAndCloseUnloadsIt() {
         val host = ViewModelProvider(compose.activity)[HostModel::class.java]
         compose.onNodeWithTag("launcher").assertIsDisplayed()
         compose.runOnIdle { assertFalse(host.projectOpen); assertNull(host.isolatedUid) }
-        compose.onNodeWithTag("app-guitar-tuner").performClick()
+        compose.waitUntil(15000) { host.projects.any { it.id == tuner.id } }
+        compose.onNodeWithTag("launcher").performScrollToNode(hasTestTag("app-${tuner.id}"))
+        compose.onNodeWithTag("app-${tuner.id}").performClick()
         compose.waitUntil(15000) { host.ui != null || host.failure != null }
         compose.onNodeWithTag("close-app").assertIsDisplayed()
         compose.onNodeWithText("GUITAR TUNER").assertIsDisplayed()

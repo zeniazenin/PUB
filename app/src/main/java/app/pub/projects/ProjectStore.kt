@@ -7,17 +7,21 @@ import java.io.File
 import java.util.UUID
 
 data class SavedProject(val id: String, val bundle: ProjectBundle)
+/** The local app library: one atomic package file per saved app at filesDir/library/<id>.json. */
 class ProjectStore(context: Context) {
     private val root = File(context.filesDir, "library").apply { mkdirs() }
     fun list(): List<SavedProject> = root.listFiles().orEmpty().filter { it.extension == "json" }.mapNotNull {
         runCatching { read(it.nameWithoutExtension) }.getOrNull()
     }.sortedBy { it.bundle.name.lowercase() }
+    /** True when the library holds no package file at all, readable or not (an AtomicFile backup counts). */
+    fun isEmpty(): Boolean = root.listFiles().orEmpty().none { it.name.endsWith(".json") || it.name.endsWith(".json.bak") }
+    /** Saves a new app. New apps always get a fresh UUID; [LEGACY_TUNER_ID] is never assigned. */
     fun save(bundle: ProjectBundle): SavedProject {
         val id = UUID.randomUUID().toString()
         return write(id, bundle)
     }
     fun read(id: String): SavedProject? {
-        require(id == "guitar-tuner" || UUID.fromString(id).toString() == id)
+        require(isAppId(id))
         val file = AtomicFile(File(root, "$id.json"))
         if (!file.baseFile.exists() && !File(root, "$id.json.bak").exists()) return null
         val json = file.openRead().use { input ->
@@ -30,9 +34,10 @@ class ProjectStore(context: Context) {
         }
         return SavedProject(id, ProjectBundle.parse(json))
     }
+    /** Replaces an existing app's package under the same ID; never creates an app. */
     fun update(id: String, bundle: ProjectBundle): SavedProject {
-        require(id == "guitar-tuner" || UUID.fromString(id).toString() == id)
-        check(id == "guitar-tuner" || read(id) != null) { "App was deleted" }
+        require(isAppId(id))
+        check(read(id) != null) { "App was deleted" }
         return write(id, bundle)
     }
     private fun write(id: String, bundle: ProjectBundle): SavedProject {
@@ -44,8 +49,22 @@ class ProjectStore(context: Context) {
         return SavedProject(id, bundle)
     }
     fun delete(id: String) {
-        require(id == "guitar-tuner" || UUID.fromString(id).toString() == id)
+        require(isAppId(id))
         AtomicFile(File(root, "$id.json")).delete()
         check(!File(root, "$id.json").exists()) { "Could not delete project" }
+    }
+
+    companion object {
+        /**
+         * Legacy ID of an app saved from the former built-in tuner. Builds that bundled the tuner stored an edited
+         * copy at library/guitar-tuner.json, with its data, photos, permission rules, spec and prompt history under
+         * this ID. Current builds ship no tuner and never assign or create this ID (new apps always get UUIDs); it
+         * stays valid only so such an existing saved package keeps working like any other app. No data is migrated.
+         */
+        const val LEGACY_TUNER_ID = "guitar-tuner"
+
+        /** Host-assigned app IDs only: a canonical UUID or [LEGACY_TUNER_ID], so an ID can never become another path. */
+        fun isAppId(id: String): Boolean =
+            id == LEGACY_TUNER_ID || runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
     }
 }

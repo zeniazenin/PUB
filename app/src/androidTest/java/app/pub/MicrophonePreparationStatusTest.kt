@@ -33,7 +33,8 @@ class MicrophonePreparationStatusTest {
         val statuses = mutableListOf<Pair<Boolean, String>>()
         var pending: ((AudioDeviceInfo?) -> Unit)? = null
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            val broker = PermissionBroker(context,
+            val app = UUID.randomUUID().toString()
+            val broker = PermissionBroker(context, projectId = { app },
                 prepareInput = { ready, _ -> pending = ready }, declared = { true },
                 requestUser = { fail("The isolated policy allows capture") }, requestAndroid = { fail("The fixture permission is granted") },
                 status = { active, message -> statuses.add(active to message) }, pitch = { _, _ -> fail("Capture must never start") })
@@ -63,7 +64,8 @@ class MicrophonePreparationStatusTest {
         val statuses = mutableListOf<Pair<Boolean, String>>()
         var reject: ((String) -> Unit)? = null
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
-            val broker = PermissionBroker(context,
+            val app = UUID.randomUUID().toString()
+            val broker = PermissionBroker(context, projectId = { app },
                 prepareInput = { _, error -> reject = error }, declared = { true },
                 requestUser = { fail("The isolated policy allows capture") }, requestAndroid = { fail("The fixture permission is granted") },
                 status = { active, message -> statuses.add(active to message) }, pitch = { _, _ -> fail("Capture must never start") })

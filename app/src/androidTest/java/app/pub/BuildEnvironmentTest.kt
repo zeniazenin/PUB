@@ -10,14 +10,19 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
 
 class BuildEnvironmentTest {
+    // An edit's context needs an existing saved app.
+    @get:Rule val tuner = TunerFixtureRule()
+
     @Test fun contextContainsActualViewportAndRuntimeLimitsWithoutAccountIdentity() {
         val app=ApplicationProvider.getApplicationContext<Application>()
         val host=HostModel(app)
         host.updateBuilderViewport(1080,1800)
-        val context=JsonParser.parseString(host.generationContext("guitar-tuner")).asJsonObject
+        TunerFixture.awaitListed(host, tuner.id)
+        val context=JsonParser.parseString(host.generationContext(tuner.id)).asJsonObject
         assertFalse(context.has("hostUid"));assertFalse(context.has("cloudConnection"))
         assertTrue(context.has("hardware"));assertTrue(context.has("model"));assertTrue(context.has("fontScale"))
         assertEquals(1080/app.resources.displayMetrics.density,context.getAsJsonObject("layoutContext")["measuredBuilderViewportWidthDp"].asFloat,0.1f)

@@ -10,12 +10,15 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Runs the installed saved tuner without replacing its source, storage, or persistent access rules. */
+/** Runs a saved tuner app (a fixture installed for the test and removed afterwards) with the real microphone. */
 @RunWith(AndroidJUnit4::class)
 class TunerStartRegressionTest {
+    @get:Rule val tuner = TunerFixtureRule()
+
     @Test fun savedTunerStartKeepsListeningAndReceivingSamples() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         assumeTrue("The real microphone test requires the existing Android grant",
@@ -25,8 +28,9 @@ class TunerStartRegressionTest {
             scenario.onActivity { activity ->
                 activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 host = ViewModelProvider(activity)[HostModel::class.java]
-                host.openProject(host.editableProject("guitar-tuner"))
             }
+            TunerFixture.awaitListed(host, tuner.id)
+            scenario.onActivity { host.openProject(host.editableProject(tuner.id)) }
             fun waitFor(label: String, condition: () -> Boolean) {
                 val deadline = SystemClock.elapsedRealtime() + 15_000
                 while (SystemClock.elapsedRealtime() < deadline) {

@@ -1,0 +1,18 @@
+PUB launcher icon — November 5, 2026
+
+Created using the built-in ImageGen tool. Original transparent PNG retained without retouching. Android supplies the dark pine background and launcher mask. Android 13+ monochrome themed icons use the same alpha silhouette.
+
+Design: a flowing jade/mint P with a warm apricot connector. The ribbon expresses flow; its joined parts express integration, connectivity and DIY assembly.
+
+Research:
+https://www.creativebloq.com/design/logos-icons/these-logo-design-trends-will-define-2026
+https://developer.apple.com/videos/play/wwdc2025/220/
+https://developer.android.com/develop/ui/compose/system/icon_design_adaptive
+
+Final ImageGen prompt:
+Use case: logo-brand.
+Asset type: production Android adaptive launcher icon foreground for PUB, an app that lets people describe, build and run their own small apps.
+Create one original, exceptionally refined symbol expressing flow, integration, connectivity and DIY assembly: a bold flowing capital-P-like loop constructed from two interlocking rounded ribbon modules, with one small rounded-square connector visibly completing the join. One coherent memorable silhouette, a single generous negative-space opening, three components maximum. It should read as an elegant assembled flowing P, not a generic infinity sign or a knot.
+Style: contemporary premium 2026 product icon, clean sculptural geometry, restrained satin depth and gentle bevels, smooth mint-to-jade gradient on the main ribbon with a warm soft apricot connector. Friendly, crafted, confident. Crisp edges, strong visual weight, no thin wires or fine texture, readable at 48 pixels.
+Composition: exactly square canvas, straight-on front view with very slight material depth, optically centered. The ENTIRE symbol including any subtle edge shadow must fit inside the central 56 percent of canvas width and height, leaving generous fully transparent margins on every side. Transparent background and transparent opening, no tile or container, no ground plane, no background glow, no cast shadow outside symbol. This foreground will be placed on very dark pine #111D1A by Android.
+No words, no caption, no typography except the abstract P silhouette, no watermark, no mockup, no multiple variants, no phone, no OpenAI knot or other existing brand mark.

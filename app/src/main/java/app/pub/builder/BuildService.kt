@@ -127,7 +127,7 @@ class BuildService : Service() {
         running = controller.buildInProgress,
         phase = BuildNotifications.phase(controller.busy, controller.capturePending != null),
         hasDraft = controller.draft != null,
-        needsReview = controller.visualReviewError != null,
+        needsReview = controller.visualReviewError != null || controller.checksError != null,
         storageError = controller.message == "Build storage error",
         cancelled = controller.message == "Cancelled" || controller.message?.startsWith("Build cancelled") == true
     )
@@ -254,6 +254,9 @@ internal object BuildNotifications {
         if (capturing) return "Rendering the app preview…"
         val label = busy?.lowercase(Locale.ROOT).orEmpty()
         return when {
+            "research" in label -> "Researching similar apps…"
+            // Before the repair and "check" rules, so behavior testing is never shown as a screenshot check.
+            "testing" in label -> "Testing the app…"
             "repair" in label || "fix" in label || "revis" in label -> "Improving the app preview…"
             "review" in label || "check" in label -> "Checking the app preview…"
             "sav" in label || "persist" in label -> "Saving build progress…"

@@ -17,6 +17,14 @@ interface BuilderState {
     val visualReview:String?
     val visualReviewError:String?
     val editingProject:SavedProject?
+    /**
+     * The edited app's stored spec (its original request, saved research and behavior checks), read in the
+     * background; null while loading, for a new app and for an app without one (the bundled tuner until its
+     * first saved edit, apps saved before specs existed).
+     */
+    val editingSpec:app.pub.core.AppSpec?
+    /** Short notice when the edited app's spec exists but could not be read; edits then research the change only. */
+    val editingSpecNote:String?
     val imageToolsUnavailable:Boolean
     val account:String?
     val models:List<ModelChoice>
@@ -28,6 +36,19 @@ interface BuilderState {
     val message:String?
     val draft:ProjectBundle?
     val draftHistoryId:String?
+    /** Research for the build in progress or the current draft; null when research was skipped or failed. */
+    val researchBrief:app.pub.core.ResearchBrief?
+    /** Short notice when research fell back to model knowledge or could not complete. */
+    val researchNote:String?
+    /**
+     * The build's behavior checks, fixed by its initial generation. null when none were requested (fake
+     * backends, older drafts); empty when they were requested but the model supplied none that were usable.
+     */
+    val draftTests:app.pub.core.AppTestSuite?
+    /** Latest behavior-check results for the current draft; null until checks have run on it. */
+    val checksReport:app.pub.core.ChecksReport?
+    /** Why checks still fail, could not run or could not be repaired. Never blocks preview or save. */
+    val checksError:String?
     val history:List<PromptHistoryEntry>
     val historyError:String?
     fun beginEdit(project:SavedProject)

@@ -2,7 +2,10 @@ package app.pub.builder
 
 import android.content.Context
 import android.util.AtomicFile
+import app.pub.core.AppTestSuite
+import app.pub.core.ChecksReport
 import app.pub.core.ProjectBundle
+import app.pub.core.ResearchBrief
 import app.pub.projects.SavedProject
 import com.google.gson.*
 import com.google.gson.stream.JsonReader
@@ -28,7 +31,18 @@ data class BuildDraftSnapshot(
     val message: String?,
     val visualReview: String?,
     val visualReviewError: String?,
-    val running: Boolean
+    val running: Boolean,
+    /** Pre-build research for the current session's build; version-1 snapshots restore without one. */
+    val research: ResearchBrief? = null,
+    /** The build's behavior checks from its initial generation; snapshots before version 3 restore without them. */
+    val tests: AppTestSuite? = null,
+    /** Latest behavior-check results for the draft; null when none ran. Requires [tests] of the same size. */
+    val checks: ChecksReport? = null,
+    /**
+     * The request the draft's app was first built from (the saved app's stored request, or the session's first
+     * build request); null without a draft and for snapshots before version 4.
+     */
+    val originalRequest: String? = null
 )
 
 /** Safe error text for the controller; the underlying cause is never incorporated into the message. */
@@ -100,7 +114,7 @@ class BuildDraftStore(context: Context) {
         return decode(root)
     }
     private fun encode(snapshot: BuildDraftSnapshot) = JsonObject().apply {
-        addProperty("version", 1); addProperty("prompt", snapshot.prompt); addProperty("sessionId", snapshot.sessionId)
+        addProperty("version", VERSION); addProperty("prompt", snapshot.prompt); addProperty("sessionId", snapshot.sessionId)
         add("editingProject", snapshot.editingProject?.let { project -> JsonObject().apply {
             addProperty("id", project.id); add("bundle", bundleJson(project.bundle))
         } } ?: JsonNull.INSTANCE)
@@ -109,6 +123,10 @@ class BuildDraftStore(context: Context) {
         addProperty("draftModel", snapshot.draftModel); addProperty("repairPass", snapshot.repairPass)
         addProperty("message", snapshot.message); addProperty("visualReview", snapshot.visualReview)
         addProperty("visualReviewError", snapshot.visualReviewError); addProperty("running", snapshot.running)
+        add("research", snapshot.research?.let { JsonParser.parseString(it.toJson()) } ?: JsonNull.INSTANCE)
+        add("tests", snapshot.tests?.let { JsonParser.parseString(it.toJson()) } ?: JsonNull.INSTANCE)
+        add("checks", snapshot.checks?.let { JsonParser.parseString(it.toJson()) } ?: JsonNull.INSTANCE)
+        addProperty("originalRequest", snapshot.originalRequest)
     }
     private fun bundleJson(bundle: ProjectBundle): JsonObject {
         val text = bundle.toJson()
@@ -119,8 +137,12 @@ class BuildDraftStore(context: Context) {
         val bundleOf: (JsonElement) -> ProjectBundle = if (parseBundles) ::decodeBundle else { value ->
             require(value.isJsonObject); PLACEHOLDER_BUNDLE
         }
-        require(root.keySet() == FIELDS) { "Unexpected draft fields" }
-        require(integer(root, "version") == 1) { "Unsupported draft version" }
+        // Version 1 predates research, version 2 behavior checks and version 3 the original request; each version
+        // has exactly its own field set.
+        val version = root["version"]?.let { integer(root, "version") }
+        val fields = when (version) { 1 -> FIELDS_V1; 2 -> FIELDS_V2; 3 -> FIELDS_V3; VERSION -> FIELDS; else -> null }
+        require(fields != null) { "Unsupported draft version" }
+        require(root.keySet() == fields) { "Unexpected draft fields" }
         val session = string(root, "sessionId", 36).also { require(validUuid(it)) }
         val history = nullableString(root, "draftHistoryId", 36)?.also { require(validUuid(it)) }
         val pass = integer(root, "repairPass").also { require(it in 0..2) }
@@ -135,10 +157,25 @@ class BuildDraftStore(context: Context) {
         }
         val draft = root["draft"].let { if (it.isJsonNull) null else bundleOf(it) }
         require(root["running"].isJsonPrimitive && root["running"].asJsonPrimitive.isBoolean)
+        val research = root["research"]?.takeUnless { it.isJsonNull }?.let { value ->
+            require(value.isJsonObject)
+            ResearchBrief.parse(value.toString())
+        }
+        val tests = root["tests"]?.takeUnless { it.isJsonNull }?.let { value ->
+            require(value.isJsonArray)
+            AppTestSuite.parse(value.toString())
+        }
+        val checks = root["checks"]?.takeUnless { it.isJsonNull }?.let { value ->
+            require(value.isJsonObject)
+            ChecksReport.parse(value.toString())
+        }
+        // A report is only ever produced from the build's suite, one result per test.
+        require(checks == null || (tests != null && checks.total == tests.tests.size)) { "Behavior checks do not match their suite" }
+        val original = if (root.has("originalRequest")) nullableString(root, "originalRequest", 8000)?.also { require(it.isNotBlank()) } else null
         return BuildDraftSnapshot(string(root, "prompt", 8000), session, editing, draft, history,
             string(root, "draftRequest", 8000), string(root, "draftModel", 200), pass,
             nullableString(root, "message", 1000), nullableString(root, "visualReview", 6000),
-            nullableString(root, "visualReviewError", 6000), root["running"].asBoolean)
+            nullableString(root, "visualReviewError", 6000), root["running"].asBoolean, research, tests, checks, original)
     }
     private fun decodeBundle(value: JsonElement): ProjectBundle {
         require(value.isJsonObject)
@@ -182,7 +219,15 @@ class BuildDraftStore(context: Context) {
         catch (error: Exception) { throw BuildDraftStoreException(message, error) }
     companion object {
         const val MAX_SNAPSHOT_BYTES = 40 * 1024 * 1024
-        private val FIELDS = setOf("version", "prompt", "sessionId", "editingProject", "draft", "draftHistoryId", "draftRequest", "draftModel", "repairPass", "message", "visualReview", "visualReviewError", "running")
+        /**
+         * Written version. Version 1 (no research), version 2 (no tests or checks) and version 3 (no original
+         * request) files are still read.
+         */
+        const val VERSION = 4
+        private val FIELDS_V1 = setOf("version", "prompt", "sessionId", "editingProject", "draft", "draftHistoryId", "draftRequest", "draftModel", "repairPass", "message", "visualReview", "visualReviewError", "running")
+        private val FIELDS_V2 = FIELDS_V1 + "research"
+        private val FIELDS_V3 = FIELDS_V2 + setOf("tests", "checks")
+        private val FIELDS = FIELDS_V3 + "originalRequest"
         private val lock = Any()
         // Per file path: the version of the snapshot file this process last read or wrote successfully.
         private val verified = mutableMapOf<String, FileSignature>()

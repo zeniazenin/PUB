@@ -6,8 +6,10 @@ Each successful build now runs this sequence automatically:
 
 1. Render a clean native preview with empty private storage and no hardware access.
 2. Capture the generated viewport and ask the selected ChatGPT model to check the original requirements.
-3. If concrete visible issues are found, generate a corrected package using the current draft, original requirements, review findings and full build environment.
+3. If concrete visible issues are found, generate a corrected package using the current draft, original requirements, review findings and full build environment (and the build's research brief, as background).
 4. Capture the corrected app again and review the fresh screenshot.
+
+Current behaviour: a research step comes before generation, and the build's behavior checks (with their own automatic repairs) run before step 1 and again after every repair; visual and behavior repairs share the two-repair budget, and the review also receives the research brief and a checks summary. See docs/research.md and docs/behavior-checks.md.
 
 Up to two repair attempts are permitted per build. The loop stops on a visible pass, an unverifiable screenshot, cancellation, failure, unchanged output, additional permission requests, or the repair limit. It keeps the latest valid draft and reports unresolved issues. Saving remains a user action.
 

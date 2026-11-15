@@ -27,7 +27,7 @@ Official references checked during implementation:
 
 ## Package and execution flow
 
-Model output contains exactly `name`, `description`, `capabilities`, and `source`. Metadata, source size, JSON depth, capability allowlist and field set validate before preview. No model-supplied ID, entrypoint, path, URL or executable binary is accepted.
+Model output contains exactly `name`, `description`, `capabilities`, and `source` (0.5.0 added the optional `assets` and `icon`; a generation response may also carry a `tests` array, which is removed and validated separately before the package is parsed; see docs/behavior-checks.md). Metadata, source size, JSON depth, capability allowlist and field set validate before preview. No model-supplied ID, entrypoint, path, URL or executable binary is accepted.
 
 The host selects a random preview identity and launches the existing isolated runtime. Code defines `dispatch(jsonText)` returning a full native UI packet plus bounded effects. Text input events extend the original tuner contract. Generic `storage.save` stores an object under the current project only; old `settings.save` is restricted to the bundled tuner.
 

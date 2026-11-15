@@ -10,9 +10,9 @@ Each new-app session has its own history. Saving links all its attempts, includi
 
 After a successful generation, PUB runs the draft in its isolated JavaScript runtime with empty storage and settings. All effects are ignored, no hardware access is provided, and saved photos are not loaded. It renders the initial viewport using the native renderer and current theme, waits for graphical assets, and captures only the generated surface.
 
-The screenshot is bounded to 1280 pixels on its longest side and 4 MiB. PUB sends it, the submitted request and generated app code to the selected model through the existing ChatGPT connection. Screenshot bytes are temporary, not saved to the user's photo library. Review findings are stored with the exact prompt.
+The screenshot is bounded to 1280 pixels on its longest side and 4 MiB. PUB sends it, the submitted request and generated app code to the selected model through the existing ChatGPT connection (now also the build's research brief and a behavior-check summary as data; see docs/research.md and docs/behavior-checks.md). Screenshot bytes are temporary, not saved to the user's photo library. Review findings are stored with the exact prompt.
 
-**Use review in next edit** places the findings into an editable instruction. Generate again to revise the current draft and run another review. Manual preview and save remain available when screenshot review fails.
+In 0.6.0, **Use review in next edit** placed the findings into an editable instruction. Since 0.6.1 that button is gone: concrete findings trigger automatic repairs instead (docs/automatic-visual-repair.md). Manual preview and save remain available when screenshot review fails.
 
 Review covers only the initial visible screen. It does not prove button behavior, scrolling content, calculations, microphone detection, hardware operations, persistence or accessibility. These still require interactive testing. Image-input review and raster-image generation are different provider capabilities.
 

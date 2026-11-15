@@ -9,7 +9,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 
-/** Submitted instructions, request metadata and optional advisory AI review; never app code, context or credentials. */
+/**
+ * Submitted instructions, request metadata, optional advisory AI review and short research and behavior-check
+ * summaries; never app code, research sources' content, context or credentials.
+ */
 data class PromptHistoryEntry(
     val id: String,
     val createdAtMillis: Long,
@@ -22,7 +25,11 @@ data class PromptHistoryEntry(
     val interrupted: Boolean = false,
     val sessionId: String? = null,
     val review: String? = null,
-    val automatic: Boolean = false
+    val automatic: Boolean = false,
+    /** How this request was researched, e.g. "Researched on the web · tip calculator · 6 sources", and the summary. */
+    val research: String? = null,
+    /** This request's behavior-check outcome, e.g. "5 of 6 behavior checks passed", and the failing checks. */
+    val checks: String? = null
 )
 
 class PromptHistoryFullException : IllegalStateException("Prompt history storage is full. Existing app histories have been preserved.")
@@ -71,6 +78,17 @@ class PromptHistoryStore(context: Context) {
         val old = read()
         if (old.none { it.id == id }) return@synchronized false
         write(old.map { if (it.id == id) it.copy(review = text) else it })
+        true
+    }
+    /** Records how [id]'s build was researched; replaces an earlier note for the same request. */
+    fun recordResearch(id: String, text: String): Boolean = recordDetail(id, text) { copy(research = text) }
+    /** Records [id]'s latest behavior-check outcome; replaces an earlier one for the same request. */
+    fun recordChecks(id: String, text: String): Boolean = recordDetail(id, text) { copy(checks = text) }
+    private fun recordDetail(id: String, text: String, change: PromptHistoryEntry.() -> PromptHistoryEntry): Boolean = synchronized(lock) {
+        require(text.isNotBlank() && text.length <= MAX_DETAIL_CHARS) { "History details must contain 1 to $MAX_DETAIL_CHARS characters" }
+        val old = read()
+        if (old.none { it.id == id }) return@synchronized false
+        write(old.map { if (it.id == id) it.change() else it })
         true
     }
     fun markSaved(id: String, projectId: String, title: String): Boolean = synchronized(lock) {
@@ -134,7 +152,8 @@ class PromptHistoryStore(context: Context) {
         val entries = requests.map { item ->
             val entry = item.asJsonObject
             val requiredFields = setOf("id", "createdAtMillis", "prompt", "model", "kind", "status", "projectId", "title", "interrupted")
-            check(entry.keySet().containsAll(requiredFields) && (requiredFields + setOf("sessionId", "review", "automatic")).containsAll(entry.keySet()))
+            // Optional fields were added over time; older journals simply lack them. Anything else is rejected.
+            check(entry.keySet().containsAll(requiredFields) && (requiredFields + OPTIONAL_FIELDS).containsAll(entry.keySet()))
             fun string(key: String, max: Int): String {
                 val value = entry[key]
                 check(value.isJsonPrimitive && value.asJsonPrimitive.isString)
@@ -149,11 +168,13 @@ class PromptHistoryStore(context: Context) {
             val sessionId = if (!entry.has("sessionId") || entry["sessionId"].isJsonNull) null else string("sessionId", 36).also { check(validUuid(it)) }
             val review = if (!entry.has("review") || entry["review"].isJsonNull) null else string("review", MAX_REVIEW_CHARS).also { check(it.isNotBlank()) }
             val automatic=entry["automatic"]?.let { check(it.isJsonPrimitive && it.asJsonPrimitive.isBoolean); it.asBoolean } ?: false
+            fun detail(key: String) = if (!entry.has(key) || entry[key].isJsonNull) null else string(key, MAX_DETAIL_CHARS).also { check(it.isNotBlank()) }
+            val research = detail("research"); val checks = detail("checks")
             check(kind != "edit" || projectId != null)
             check(entry["createdAtMillis"].isJsonPrimitive && entry["createdAtMillis"].asJsonPrimitive.isNumber)
             val time = entry["createdAtMillis"].asBigDecimal.longValueExact(); check(time > 0)
             check(entry["interrupted"].isJsonPrimitive && entry["interrupted"].asJsonPrimitive.isBoolean)
-            PromptHistoryEntry(id, time, prompt, model, kind, status, projectId, string("title", 120), entry["interrupted"].asBoolean, sessionId, review, automatic)
+            PromptHistoryEntry(id, time, prompt, model, kind, status, projectId, string("title", 120), entry["interrupted"].asBoolean, sessionId, review, automatic, research, checks)
         }
         check(entries.map { it.id }.distinct().size == entries.size)
         return entries // File order is authoritative when the phone's wall clock changes.
@@ -179,6 +200,8 @@ class PromptHistoryStore(context: Context) {
                 entry.sessionId?.let { addProperty("sessionId", it) }
                 entry.review?.let { addProperty("review", it) }
                 if(entry.automatic) addProperty("automatic", true)
+                entry.research?.let { addProperty("research", it) }
+                entry.checks?.let { addProperty("checks", it) }
             }) } })
         }
         val bytes = root.toString().toByteArray(Charsets.UTF_8)
@@ -193,6 +216,9 @@ class PromptHistoryStore(context: Context) {
     companion object {
         const val MAX_ENTRIES = 200
         const val MAX_REVIEW_CHARS = 6000
+        /** Bound for the research and behavior-check summaries. */
+        const val MAX_DETAIL_CHARS = 1500
+        private val OPTIONAL_FIELDS = setOf("sessionId", "review", "automatic", "research", "checks")
         private const val MAX_RECORDS = 50_000
         private const val MAX_FILE_BYTES = 10_500_000
         private val STATUSES = setOf("building", "ready", "failed", "cancelled", "saved")

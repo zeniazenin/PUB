@@ -1,5 +1,7 @@
 package app.pub.ui
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,10 +24,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
+import androidx.core.net.toUri
 import app.pub.HostModel
 import app.pub.builder.BuilderModel
+import app.pub.core.AppSpec
+import app.pub.core.AppTestSuite
+import app.pub.core.ChecksReport
 import app.pub.core.ProjectBundle
+import app.pub.core.ResearchBrief
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,6 +92,11 @@ fun BuilderScreen(
         TextButton(onClick = onSettings) { Text("Change model in Settings") }
     }
 
+    // What the next edit builds on. With a draft, the draft's own research and checks are shown below instead.
+    if (builder.editingProject != null && builder.draft == null) {
+        builder.editingSpec?.let { Text(specNote(it), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("edit-spec-note")) }
+            ?: builder.editingSpecNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    }
     OutlinedTextField(
         value = builder.prompt,
         onValueChange = { builder.prompt = it.take(8000) },
@@ -107,6 +129,9 @@ fun BuilderScreen(
     }
     BuilderStatus(builder)
 
+    builder.researchBrief?.let { ResearchCard(it) }
+    builder.researchNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
     builder.visualReview?.let {
         Card { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text("Visual review",style=MaterialTheme.typography.titleMedium)
@@ -122,11 +147,120 @@ fun BuilderScreen(
                 Text(draft.description)
                 if (!draft.assets.isEmpty) Text("Graphics: ${draft.assets.size()} local assets")
                 Text("Requested access: " + draft.capabilities.joinToString().ifBlank { "none" })
+                BehaviorChecksSummary(builder.draftTests, builder.checksReport, builder.checksError,
+                    running = builder.busy != null || builder.buildInProgress)
                 Button(onClick = { onPreview(draft) }, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Preview app") }
                 if(builder.visualReviewError!=null) TextButton(onClick={startWithContext(builder::retryVisualReview)},enabled=builder.busy==null && !preparing) {Text("Retry visual review")}
                 TextButton(onClick = builder::clearDraft, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Discard draft") }
             }
         }
+    }
+}
+
+/** One line for an edit that builds on the app's stored spec (its original request, research and checks). */
+internal fun specNote(spec: AppSpec): String {
+    val count = spec.testCount()
+    val checks = "$count behavior ${if (count == 1) "check" else "checks"}"
+    return when {
+        spec.brief != null && count > 0 -> "Uses this app's saved research and $checks"
+        spec.brief != null -> "Uses this app's saved research"
+        count > 0 -> "Uses this app's $checks"
+        else -> "Uses this app's original request"
+    }
+}
+
+/** PUB's own sandboxed behavior checks for the draft. Failing checks are behind a toggle to keep the card compact. */
+@Composable
+private fun BehaviorChecksSummary(tests: AppTestSuite?, report: ChecksReport?, error: String?, running: Boolean) {
+    var expanded by remember(report) { mutableStateOf(false) }
+    when {
+        report != null -> {
+            Text("Behavior checks: ${report.passed} of ${report.total} passed", modifier = Modifier.testTag("behavior-checks"))
+            val failures = report.failures()
+            if (failures.isNotEmpty()) {
+                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide details" else "Show details") }
+                if (expanded) failures.forEach { Text("• ${it.name}: ${it.detail}", style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+        tests == null -> {}
+        tests.isEmpty -> Text("No behavior checks were provided with this build.", style = MaterialTheme.typography.bodySmall)
+        !running -> Text("Behavior checks haven't run on this draft yet.", style = MaterialTheme.typography.bodySmall)
+    }
+    error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+private const val RESEARCH_PREVIEW_ITEMS = 6
+
+/**
+ * What research found and how it shaped the plan. Web results are always shown with their sources as
+ * prominent links; only https links are shown, and they open outside PUB.
+ */
+@Composable
+internal fun ResearchCard(brief: ResearchBrief) {
+    var expanded by rememberSaveable(brief.summary) { mutableStateOf(false) }
+    val included = brief.features.filter { it.feasibleInPub && it.priority != "could" }
+    val impossible = brief.features.filter { !it.feasibleInPub }
+    val sources = brief.sources.filter { it.url.startsWith("https://") }
+    val longest = maxOf(included.size, impossible.size, brief.assumptions.size, sources.size)
+    val limit = if (expanded) Int.MAX_VALUE else RESEARCH_PREVIEW_ITEMS
+    Card(Modifier.fillMaxWidth().testTag("research-card")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Research", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (brief.web) "Researched on the web" else "From the model's knowledge — not checked against the web",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (brief.web) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(brief.summary)
+            ResearchList("Included features", included.map { if (it.priority == "must") it.title else "${it.title} (if it fits)" }, limit)
+            ResearchList("Not possible in PUB", impossible.map { "${it.title} — ${it.notes}" }, limit)
+            ResearchList("Assumptions", brief.assumptions, limit)
+            if (sources.isNotEmpty()) {
+                Text("Sources", style = MaterialTheme.typography.titleSmall)
+                sources.take(limit).forEach { SourceLink(it) }
+            }
+            if (longest > RESEARCH_PREVIEW_ITEMS) {
+                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Show less" else "Show all") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResearchList(title: String, items: List<String>, limit: Int) {
+    if (items.isEmpty()) return
+    Text(title, style = MaterialTheme.typography.titleSmall)
+    items.take(limit).forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+    if (items.size > limit) Text("+${items.size - limit} more", style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun SourceLink(source: ResearchBrief.Source) {
+    val context = LocalContext.current
+    val linkColor = MaterialTheme.colorScheme.primary
+    val hostColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val text = remember(source.url, source.title, linkColor, hostColor) {
+        val host = source.url.toUri().host.orEmpty().removePrefix("www.")
+        buildAnnotatedString {
+            val link = LinkAnnotation.Url(source.url,
+                TextLinkStyles(SpanStyle(color = linkColor, fontWeight = FontWeight.Medium, textDecoration = TextDecoration.Underline))) {
+                openInBrowser(context, source.url)
+            }
+            withLink(link) { append(source.title) }
+            if (host.isNotEmpty() && !source.title.equals(host, ignoreCase = true)) {
+                withStyle(SpanStyle(color = hostColor)) { append("  ·  $host") }
+            }
+        }
+    }
+    Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(vertical = 6.dp))
+}
+
+/** Opens a source in the user's browser app, never inside PUB; a missing browser is ignored. */
+private fun openInBrowser(context: Context, url: String) {
+    if (!url.startsWith("https://")) return
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 

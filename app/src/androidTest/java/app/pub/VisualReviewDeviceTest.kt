@@ -5,11 +5,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.pub.auth.ChatGptAuth
 import app.pub.builder.VisualReview
+import app.pub.core.ChecksReport
 import app.pub.core.ModelSelection
 import app.pub.core.ProjectBundle
+import app.pub.core.ResearchBrief
 import app.pub.core.VisualReviewDecision
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -58,6 +61,37 @@ class VisualReviewDeviceTest {
         assertTrue(findings.contains("visible fixes needed"))
         assertThrows(IllegalArgumentException::class.java) { VisualReview.formatFindings("x".repeat(100_000)) }
         assertThrows(IllegalArgumentException::class.java) { VisualReview.formatFindings("  ") }
+    }
+
+    @Test fun packageContextCarriesBriefAndChecksAndShrinksThemBeforeTheSource() {
+        val brief = ResearchBrief.parseModelOutput(JsonObject().apply {
+            addProperty("summary", "A tip calculator for splitting a bill"); addProperty("category", "Calculator")
+            add("features", JsonArray().apply { add(JsonObject().apply {
+                addProperty("title", "Bill input"); addProperty("priority", "must"); addProperty("feasibleInPub", true); addProperty("notes", "")
+            }) })
+            add("logic", JsonArray().apply { repeat(12) { add("l".repeat(400)) } })
+            add("ux", JsonArray().apply { add("Result in display style near the top") })
+        }.toString())
+        val checks = ChecksReport.of(listOf(ChecksReport.Entry.passed("Init"), ChecksReport.Entry.failed("Tip", "Missing: \"Total: 115.00\"")))
+        fun bundle(source: String) = ProjectBundle.parse(JsonObject().apply {
+            addProperty("name", "Tips"); addProperty("description", "Fixture only"); addProperty("source", source)
+            add("capabilities", JsonArray())
+        }.toString())
+        val small = JsonParser.parseString(VisualReview.packageContext(bundle("function dispatch(e){return '';}"), brief, checks)).asJsonObject
+        assertEquals("A tip calculator for splitting a bill", small.getAsJsonObject("researchBrief")["summary"].asString)
+        assertEquals(12, small.getAsJsonObject("researchBrief").getAsJsonArray("logic").size())
+        assertEquals(1, small.getAsJsonObject("behaviorChecks")["passed"].asInt)
+        assertEquals("Tip", small.getAsJsonObject("behaviorChecks").getAsJsonArray("failed")[0].asJsonObject["name"].asString)
+        // Escaped quotes make this source ~116,000 context characters: the brief shrinks, the source stays whole.
+        val source = "\"".repeat(58_000)
+        val text = VisualReview.packageContext(bundle(source), brief, checks)
+        assertTrue(text.length <= 120_000)
+        val large = JsonParser.parseString(text).asJsonObject
+        assertEquals(source, large["source"].asString); assertFalse(large.has("sourceTruncated"))
+        assertTrue(large["researchBriefTrimmed"].asBoolean); assertFalse(large.getAsJsonObject("researchBrief").has("logic"))
+        assertEquals("Bill input", large.getAsJsonObject("researchBrief").getAsJsonArray("features")[0].asJsonObject["title"].asString)
+        // Without a brief or checks the context is unchanged from before.
+        assertFalse(VisualReview.packageContext(bundle("x")).contains("researchBrief"))
     }
 
     /** Opt-in only: uploads the controlled UI fixture PNG and consumes existing ChatGPT plan usage. */

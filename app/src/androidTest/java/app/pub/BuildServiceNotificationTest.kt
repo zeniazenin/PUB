@@ -48,4 +48,15 @@ class BuildServiceNotificationTest {
         assertEquals("Improving the app preview…", BuildNotifications.phase("Automatic repair 1", false))
         assertEquals("Checking the app preview…", BuildNotifications.phase("Reviewing initial screenshot", false))
     }
+
+    @Test fun researchAndBuildPhasesUseTheControllerLabels() {
+        assertEquals("Researching similar apps…", BuildNotifications.phase(app.pub.builder.BuilderController.RESEARCHING, false))
+        assertEquals("Building your app…", BuildNotifications.phase(app.pub.builder.BuilderController.BUILDING, false))
+    }
+
+    @Test fun behaviorTestingIsNotShownAsAScreenshotCheck() {
+        assertEquals("Testing the app…", BuildNotifications.phase(app.pub.builder.BuilderController.TESTING, false))
+        assertEquals("Improving the app preview…", BuildNotifications.phase("Fixing app behavior (attempt 1 of 2)...", false))
+        assertEquals("Checking the app preview…", BuildNotifications.phase("Checking screen 1 of 3...", false))
+    }
 }

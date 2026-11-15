@@ -1,6 +1,6 @@
 # PUB 0.7.0 — background building
 
-Tap Generate, then switch to another app. PUB continues generation, private preview capture, visual review and automatic repair in an Android foreground service. A progress notification includes Cancel. A completion notification opens the draft for preview and saving; the launcher also has View build result. Notifications are enabled on the connected phone.
+Tap Generate, then switch to another app. PUB continues generation, private preview capture, visual review and automatic repair in an Android foreground service (since then also research and behavior checks; see docs/research.md and docs/behavior-checks.md). A progress notification includes Cancel. A completion notification opens the draft for preview and saving; the launcher also has View build result. Notifications are enabled on the connected phone.
 
 The renderer uses an app-owned private virtual display. It renders only the generated app and never captures another app or the physical phone screen. Its isolated JavaScript process is separate from any PUB app you are currently running. Generated apps themselves still have foreground-only hardware access.
 

@@ -130,6 +130,47 @@ class PromptHistoryStoreTest {
         assertArrayEquals(bytes, file.readBytes())
     }
 
+    @Test fun researchAndCheckSummariesAreOptionalBoundedAndSurviveSaving() {
+        val store = PromptHistoryStore(context)
+        val session = UUID.randomUUID().toString()
+        val build = store.begin("Tip calculator", "model", sessionId = session); store.update(build.id, "ready", "Tips")
+        val repair = store.begin("Automatic behavior repair 1 of 2.", "model", sessionId = session, automatic = true); store.update(repair.id, "ready", "Tips")
+        val research = "Researched on the web · tip calculator · 6 sources\nA tip calculator for splitting a bill."
+        assertTrue(store.recordResearch(build.id, research))
+        assertTrue(store.recordChecks(build.id, "5 of 6 behavior checks passed\nFailed: Empty bill"))
+        assertTrue(store.recordChecks(repair.id, "6 of 6 behavior checks passed"))
+        assertTrue(store.recordChecks(build.id, "4 of 6 behavior checks passed")) // A later run replaces the earlier one.
+        assertFalse(store.recordResearch(UUID.randomUUID().toString(), research))
+        val appId = UUID.randomUUID().toString()
+        assertTrue(store.markSaved(repair.id, appId, "Tips"))
+        val loaded = PromptHistoryStore(context).list(appId)
+        assertEquals(research, loaded.first { it.id == build.id }.research)
+        assertEquals("4 of 6 behavior checks passed", loaded.first { it.id == build.id }.checks)
+        assertNull(loaded.first { it.id == repair.id }.research)
+        assertEquals("6 of 6 behavior checks passed", loaded.first { it.id == repair.id }.checks)
+        val file = File(directory, "prompt-history.json")
+        val requests = JsonParser.parseString(file.readText()).asJsonObject.getAsJsonArray("requests")
+        assertTrue(requests.first { it.asJsonObject["id"].asString == build.id }.asJsonObject.keySet().containsAll(setOf("research", "checks")))
+        // Bounds are checked before anything is written.
+        val bytes = file.readBytes()
+        assertThrows(IllegalArgumentException::class.java) { store.recordResearch(build.id, "r".repeat(PromptHistoryStore.MAX_DETAIL_CHARS + 1)) }
+        assertThrows(IllegalArgumentException::class.java) { store.recordChecks(build.id, "  ") }
+        assertArrayEquals(bytes, file.readBytes())
+        assertTrue(store.recordChecks(build.id, "c".repeat(PromptHistoryStore.MAX_DETAIL_CHARS)))
+        // Stored values are validated like every other field, and unknown fields are still rejected.
+        val valid = JsonParser.parseString(file.readText()).asJsonObject
+        listOf<(com.google.gson.JsonObject) -> Unit>(
+            { it.addProperty("research", "x".repeat(PromptHistoryStore.MAX_DETAIL_CHARS + 1)) },
+            { it.addProperty("checks", " ") },
+            { it.addProperty("checks", 5) },
+            { it.addProperty("researchSources", "https://example.com") }
+        ).forEach { change ->
+            val root = valid.deepCopy(); change(root.getAsJsonArray("requests")[0].asJsonObject)
+            file.writeText(root.toString())
+            assertThrows(Exception::class.java) { PromptHistoryStore(context).list() }
+        }
+    }
+
     @Test fun invalidRequestsAndUnreadableHistoryNeverOverwriteExistingRecords() {
         val store = PromptHistoryStore(context)
         val entry = store.begin("Keep this instruction", "model")

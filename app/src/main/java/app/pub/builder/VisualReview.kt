@@ -1,15 +1,20 @@
 package app.pub.builder
 
 import app.pub.auth.ChatGptAuth
+import app.pub.core.ChecksReport
 import app.pub.core.ProjectBundle
+import app.pub.core.ResearchBrief
 import app.pub.core.VisualReviewDecision
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 
 /** Validated visual decisions only. The caller owns consent, capture, cancellation and bounded repair. */
 class VisualReview(private val auth: ChatGptAuth) {
-    fun assess(model: String, request: String, bundle: ProjectBundle, pngBytes: ByteArray): VisualReviewDecision =
-        VisualReviewDecision.parse(auth.reviewPreview(model, request, packageContext(bundle), pngBytes))
+    /** [brief] is the draft's committed research and [checks] its latest behavior checks; both are review data. */
+    fun assess(model: String, request: String, bundle: ProjectBundle, pngBytes: ByteArray,
+               brief: ResearchBrief? = null, checks: ChecksReport? = null): VisualReviewDecision =
+        VisualReviewDecision.parse(auth.reviewPreview(model, request, packageContext(bundle, brief, checks), pngBytes))
 
     fun review(model: String, request: String, bundle: ProjectBundle, pngBytes: ByteArray): String =
         formatDecision(assess(model, request, bundle, pngBytes))
@@ -17,8 +22,12 @@ class VisualReview(private val auth: ChatGptAuth) {
     companion object {
         const val SCOPE_NOTE = "Initial visible screen only. This review is advisory; it does not test interactions, calculations, scrolling, permissions, hardware, saved data or other screen states."
 
-        /** Preserve source for requirement checks; omit image binaries, full vector geometry and local app state. */
-        fun packageContext(bundle: ProjectBundle): String {
+        /**
+         * Preserve source for requirement checks; omit image binaries, full vector geometry and local app state.
+         * The research brief (the review rubric) and a behavior-check summary are included as data. To stay within
+         * the context bound, the brief and summary shrink before the source is truncated.
+         */
+        fun packageContext(bundle: ProjectBundle, brief: ResearchBrief? = null, checks: ChecksReport? = null): String {
             val data = JsonObject().apply {
             addProperty("name", bundle.name)
             addProperty("description", bundle.description)
@@ -36,6 +45,24 @@ class VisualReview(private val auth: ChatGptAuth) {
                 }
             })
             addProperty("scope", "One initial visible screenshot; no app storage, captured-photo files or additional screens are attached. Source code is evidence of intent, not proof of runtime behavior.")
+            brief?.let { add("researchBrief", JsonParser.parseString(it.toPromptJson())) }
+            checks?.let { report -> add("behaviorChecks", JsonObject().apply {
+                addProperty("note", "PUB's own sandboxed interaction checks (fresh runtime, no storage or hardware, effects ignored). Context only, not visible evidence.")
+                addProperty("passed", report.passed); addProperty("total", report.total)
+                add("failed", JsonArray().apply { report.failures().forEach { failure ->
+                    add(JsonObject().apply { addProperty("name", failure.name); addProperty("detail", failure.detail) })
+                } })
+            }) }
+            }
+            // Least useful parts of the brief go first, then the check details, then the brief itself.
+            val briefData = data.getAsJsonObject("researchBrief")
+            for (field in listOf("sources", "comparables", "pitfalls", "assumptions", "logic", "acceptanceChecks")) {
+                if (briefData == null || data.toString().length <= 120_000) break
+                if (briefData.remove(field) != null) data.addProperty("researchBriefTrimmed", true)
+            }
+            if (data.toString().length > 120_000) data.getAsJsonObject("behaviorChecks")?.remove("failed")
+            if (data.toString().length > 120_000 && data.remove("researchBrief") != null) {
+                data.remove("researchBriefTrimmed"); data.addProperty("researchBriefOmitted", true)
             }
             // JSON escaping can enlarge an otherwise valid source. Keep a labelled excerpt instead
             // of rejecting a legitimate app or silently claiming that its complete source was reviewed.

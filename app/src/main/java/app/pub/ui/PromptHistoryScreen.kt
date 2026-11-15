@@ -45,15 +45,27 @@ private fun HistoryRequest(entry: PromptHistoryEntry) {
     OutlinedCard(Modifier.fillMaxWidth().testTag("history-${entry.id}")) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(entry.title, style = MaterialTheme.typography.titleMedium)
-            Text("${if(entry.automatic) "Automatic visual repair" else if (entry.kind == "edit") "Edit" else "Create"} · ${statusLabel(entry)}", style = MaterialTheme.typography.labelLarge)
+            Text("${kindLabel(entry)} · ${statusLabel(entry)}", style = MaterialTheme.typography.labelLarge)
             Text(timestamp, style = MaterialTheme.typography.bodySmall)
             if (!expanded) Text(entry.prompt.replace('\n', ' ').take(180) + if (entry.prompt.length > 180) "…" else "", style = MaterialTheme.typography.bodyMedium)
+            // Compact: the first line of each summary (how it was researched; how many checks passed).
+            if (!expanded) listOfNotNull(entry.research, entry.checks).forEach {
+                Text(it.lineSequence().first(), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("history-detail-${entry.id}"))
+            }
             TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide request" else "Review full request") }
             if (expanded) {
                 Text("Submitted instructions", style = MaterialTheme.typography.titleSmall)
                 SelectionContainer { Text(entry.prompt) }
                 Text("Model: ${entry.model}", style = MaterialTheme.typography.bodySmall)
                 Text("Request: ${entry.id}", style = MaterialTheme.typography.bodySmall)
+                entry.research?.let {
+                    Text("Research", style = MaterialTheme.typography.titleSmall)
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+                entry.checks?.let {
+                    Text("Behavior checks", style = MaterialTheme.typography.titleSmall)
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
                 entry.review?.let { review ->
                     Text("AI screen review", style = MaterialTheme.typography.titleSmall)
                     Text("Advisory feedback for this request; review it before making changes.", style = MaterialTheme.typography.bodySmall)
@@ -65,6 +77,13 @@ private fun HistoryRequest(entry: PromptHistoryEntry) {
             }
         }
     }
+}
+/** Automatic repairs are recorded with their generated instruction, which names the kind of repair. */
+private fun kindLabel(entry: PromptHistoryEntry) = when {
+    entry.automatic && entry.prompt.startsWith("Automatic behavior repair") -> "Automatic behavior repair"
+    entry.automatic -> "Automatic visual repair"
+    entry.kind == "edit" -> "Edit"
+    else -> "Create"
 }
 private fun statusLabel(entry: PromptHistoryEntry) = when (entry.status) {
     "building" -> "Building"

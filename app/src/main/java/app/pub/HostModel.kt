@@ -19,6 +19,7 @@ import app.pub.hardware.*
 import app.pub.core.HardwareContract
 import app.pub.core.UiPacket
 import app.pub.core.ProjectBundle
+import app.pub.projects.AppSpecStore
 import app.pub.projects.ProjectStore
 import app.pub.projects.SavedProject
 import app.pub.permissions.PermissionBroker
@@ -33,6 +34,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     private val prefs = context.getSharedPreferences("host", Context.MODE_PRIVATE)
     private val permissionPrefs = context.getSharedPreferences("permissions", Context.MODE_PRIVATE)
     private val store = ProjectStore(context)
+    private val specs = AppSpecStore(context)
     private val projectPrefs get() = context.getSharedPreferences("project.$projectId", Context.MODE_PRIVATE)
     // Loaded off the main thread: listing parses (and validates) every saved package, including image data.
     var projects by mutableStateOf(emptyList<SavedProject>())
@@ -276,6 +278,8 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                 tunerVisible = false
             }
             store.delete(project.id)
+            // The app's stored research and checks go with it (the bundled tuner starts again without any).
+            specs.delete(project.id)
             if (project.id == "guitar-tuner") { tunerOverride = null; tunerOverrideLoaded = true }
             media.delete(project.id)
             permissionPrefs.edit().apply { HardwareContract.OPERATIONS.keys.forEach {remove("${project.id}.$it")} }.apply()

@@ -10,6 +10,7 @@ Already in place:
 - **Release signing.** `bundleRelease` signs with your upload key, read from settings outside the repository. It refuses to build without the key or a report endpoint. A test bundle signed with a throwaway key built and verified on November 15, 2026. Its native libraries (CameraX and AndroidX graphics) are 16 KB-aligned.
 - **In-app reporting.** **Report content** on the build result, **Report research** on the Research card and **Report app** in each saved app's long-press menu open a form that sends the report to your endpoint without leaving PUB. The endpoint is `tools/report-endpoint`.
 - **Privacy policy.** A draft is in `docs/privacy-policy.md`, linked from Settings → Privacy policy and from Help & guide.
+- **Open-source license.** PUB is released under the BSD Zero Clause License (0BSD, in `LICENSE`). It's the most permissive OSI-approved license: anyone may use, change and share the code for any purpose, without even having to credit you.
 - The `release` build type is R8-minified and shrunk. The `benchmark` variant uses the same settings, so test the release build with it.
 - `allowBackup=false` and a launcher icon.
 - No ads, analytics or tracking SDKs, and no `AD_ID` permission.
@@ -29,7 +30,7 @@ Should be settled before launch:
 
 | # | Item | Why |
 |---|------|-----|
-| 5 | ChatGPT plan usage eligibility | OpenAI's docs describe the dynamic, no-client-ID sign-in flow PUB uses as being "for open-source and locally hosted apps", and send paid or remotely hosted apps to an interest form. PUB is free and runs on the phone, which fits. But the repository is public with **no license file**, so legally it isn't open source yet. Add an open-source license (Apache-2.0 or MIT), and consider confirming with OpenAI through the interest form. If OpenAI disables the client, the builder stops working for every user. |
+| 5 | ChatGPT plan usage eligibility | OpenAI's docs describe the dynamic, no-client-ID sign-in flow PUB uses as being "for open-source and locally hosted apps", and send paid or remotely hosted apps to an interest form. PUB is free, runs on the phone and is open source under 0BSD, which fits. Consider confirming with OpenAI through the interest form. If OpenAI disables the client, the builder stops working for every user. |
 | 6 | Package name `app.pub` | It becomes permanent on first upload. It appears to be free (no public Play listing), and Play tells you on upload if it's taken. If you'd rather tie it to the LLC (for example `com.lttl.pub`), change `applicationId` before the first upload. Only your own test installs lose their data. |
 
 ## Step 1: Choose the account type
@@ -64,7 +65,7 @@ Should be settled before launch:
 - [x] **Privacy policy link** in Settings and Help & guide: done.
 - [x] **Release signing**: configured. You still need to create the key (below).
 - [ ] **Test on an Android 16 phone.** On Android 16, apps can't opt out of edge-to-edge, predictive back is on by default, and orientation and resizability locks are ignored on tablets and foldables.
-- [ ] **License file** in the repository (see item 5 above). Choosing the license is your call.
+- [x] **License file**: done (0BSD, see item 5 above).
 - [ ] **Package name**: keep `app.pub` or change `applicationId` (item 6).
 - [ ] **Version**: every upload needs a higher `versionCode` (currently 11). Consider bumping `versionName` to 1.0.0 for launch.
 

@@ -138,3 +138,8 @@ Validation: 94 JVM tests and 21 focused device tests passed, including live Chat
 Generation, native screenshot review and automatic repairs continue when the Activity stops or the screen turns off. A foreground progress notification offers Cancel; completion opens the durable pending draft for preview/save. Private virtual-display rendering never captures other apps. Separate isolated JS service instances prevent background review from disrupting an open PUB app. Force-stop/reboot recovery preserves the last checkpoint without automatically repeating a paid request. See docs/background-builds.md for architecture, behavior and device validation.
 
 Validation: all 94 core tests, Android build/lint (zero errors), and targeted device checks passed, including live ChatGPT background generation, notification navigation, screen-off repair/review, cancellation, recovery and renderer/runtime isolation.
+
+
+## License
+
+PUB is released under the [BSD Zero Clause License (0BSD)](LICENSE). Anyone may use, copy, change and share it, for any purpose, with or without a fee and without having to give credit. The Gradle wrapper (`gradlew`, `gradlew.bat`, `gradle/wrapper/`) belongs to Gradle and stays under its Apache-2.0 license. The libraries PUB uses keep their own licenses.

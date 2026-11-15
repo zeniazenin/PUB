@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.pub.HostModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun HelpScreen(host: HostModel) {
@@ -83,8 +85,12 @@ fun HelpScreen(host: HostModel) {
         TextButton(onClick = { contextOpen = !contextOpen }, modifier = Modifier.testTag("help-context")) {
             Text(if (contextOpen) "Hide phone context" else "View current phone context")
         }
-        if (contextOpen) SelectionContainer {
-            Text(host.generationContext(), style = MaterialTheme.typography.bodySmall)
+        if (contextOpen) {
+            // Building the context scans the hardware inventory; never do that during composition.
+            val context by produceState<String?>(null) { value = withContext(Dispatchers.IO) { runCatching { host.generationContext() }.getOrNull() } }
+            SelectionContainer {
+                Text(context ?: "Reading phone context…", style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

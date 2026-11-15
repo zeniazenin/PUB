@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,12 +25,28 @@ import androidx.compose.ui.unit.sp
 import com.google.gson.JsonObject
 import kotlin.math.abs
 
+/**
+ * A validated UI-packet node. Packets are never mutated after parsing and JsonObject equality is
+ * structural, so marking this stable lets Compose skip every subtree that is unchanged between packets
+ * (each script reply is a whole new tree; a tuner sends one per pitch frame).
+ */
+@Immutable
+private class UiNode(val json: JsonObject) {
+    override fun equals(other: Any?) = other is UiNode && other.json == json
+    override fun hashCode() = json.hashCode()
+}
+
+@Composable
+fun NativeRenderer(node: JsonObject, onAction: (String) -> Unit, onInput: (String, String) -> Unit = { _, _ -> }, resolveImage: (String) -> File? = { null }, resolveGraphic: (String) -> JsonObject? = { null }) =
+    RenderNode(UiNode(node), onAction, onInput, resolveImage, resolveGraphic)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NativeRenderer(node: JsonObject, onAction: (String) -> Unit, onInput: (String, String) -> Unit = { _, _ -> }, resolveImage: (String) -> File? = { null }, resolveGraphic: (String) -> JsonObject? = { null }) {
+private fun RenderNode(wrapped: UiNode, onAction: (String) -> Unit, onInput: (String, String) -> Unit, resolveImage: (String) -> File?, resolveGraphic: (String) -> JsonObject?) {
+    val node = wrapped.json
     when (node["type"].asString) {
         "column" -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            node["children"].asJsonArray.forEach { NativeRenderer(it.asJsonObject, onAction, onInput, resolveImage, resolveGraphic) }
+            node["children"].asJsonArray.forEach { RenderNode(UiNode(it.asJsonObject), onAction, onInput, resolveImage, resolveGraphic) }
         }
         "graphic" -> {
             val asset = resolveGraphic(node["asset"].asString)

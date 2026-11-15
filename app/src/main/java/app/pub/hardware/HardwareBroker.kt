@@ -84,9 +84,10 @@ class HardwareBroker(
         }
     }
     private fun granted(permission: String) = context.checkSelfPermission(permission)==PackageManager.PERMISSION_GRANTED
+    private var recheckRunning=false
     private val recheck=object:Runnable {
         override fun run() {
-            if(closed) return
+            if(closed) { recheckRunning=false; return }
             if(activeCaps.any { !allowed(it) } || activePermissions.any { !granted(it) } ||
                 ("location" in activeCaps && !granted(Manifest.permission.ACCESS_COARSE_LOCATION) && !granted(Manifest.permission.ACCESS_FINE_LOCATION))) {
                 close(); changed(); return
@@ -143,8 +144,11 @@ class HardwareBroker(
         if(interactive && nativeRequest!=null) {error(r,"busy","Finish the open hardware screen first.");return}
         val nativeToken=if(interactive) Any() else null
         if(nativeToken!=null) nativeRequest=nativeToken
-        activeCaps.add(cap); activePermissions.addAll(needed);changed()
-        main.removeCallbacks(recheck); main.postDelayed(recheck,250)
+        // Notify only when the active set grows: each change makes the host recompose its hardware controls.
+        if (activeCaps.add(cap) or activePermissions.addAll(needed)) changed()
+        // Start the 250 ms revocation check once. Rescheduling it on every request meant a stream of
+        // requests closer than 250 ms apart postponed it indefinitely.
+        if(!recheckRunning) { recheckRunning=true; main.postDelayed(recheck,250) }
         val reply: (String,JsonObject)->Unit = { event,data -> main.post {
             if(allowed(cap) && permissions(r).all(::granted)) {
                 if(nativeToken!=null && nativeRequest===nativeToken && event in setOf("error","cancelled","device","audio.route")) {
@@ -184,7 +188,7 @@ class HardwareBroker(
     private fun error(r:JsonObject,code:String,message:String) = send(r,"error",JsonObject().apply { addProperty("code",code);addProperty("message",message) })
     fun close() {
         if(closed) return
-        closed=true; pending=null;nativeRequest=null;grants.clear();main.removeCallbacksAndMessages(null)
+        closed=true; pending=null;nativeRequest=null;grants.clear();main.removeCallbacksAndMessages(null);recheckRunning=false
         prompt(null);requestAndroid(null);picker(null);camera(null);nfc(null)
         platform?.close();bluetooth?.close();usb?.close()
         platform=null;bluetooth=null;usb=null

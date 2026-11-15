@@ -7,6 +7,7 @@ import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.system.Os
 import androidx.exifinterface.media.ExifInterface
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -84,9 +85,14 @@ class ProjectMedia(context: Context) {
         check(staging.mkdir()) { "Could not prepare photo storage" }
         try {
             photos.forEach { photo ->
-                FileOutputStream(File(staging, photo.name)).use { output ->
-                    photo.inputStream().use { it.copyTo(output) }
-                    output.fd.sync()
+                val target = File(staging, photo.name)
+                // Published photos are never modified and were fsynced at capture, so a hard link shares the
+                // same data instantly instead of copying up to 1 GiB. Copy only where links are unsupported.
+                if (runCatching { Os.link(photo.path, target.path) }.isFailure) {
+                    FileOutputStream(target).use { output ->
+                        photo.inputStream().use { it.copyTo(output, COPY_BUFFER_BYTES) }
+                        output.fd.sync()
+                    }
                 }
             }
             if (destination.exists()) check(destination.delete())
@@ -118,6 +124,7 @@ class ProjectMedia(context: Context) {
         const val MAX_PROJECT_BYTES = 1024L * 1024 * 1024
         const val MAX_PHOTO_BYTES = 256L * 1024 * 1024
         private const val MAX_RAW_BYTES = MAX_PHOTO_BYTES
+        private const val COPY_BUFFER_BYTES = 256 * 1024
         private val ASSET = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jpg")
         private val lock = Any()
         private fun isUuid(id: String) = runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
@@ -134,13 +141,18 @@ class ProjectMedia(context: Context) {
             File(directory, ".capture-${UUID.randomUUID()}.jpg").also { check(it.createNewFile()) }
         }
 
-        /** Preserve camera JPEG pixels/quality, sanitize metadata, then publish atomically. No full-size bitmap. */
-        internal fun finishCapture(directory: File, raw: File): JsonObject = synchronized(lock) {
+        /**
+         * Preserve camera JPEG pixels/quality, sanitize metadata, then publish atomically. No full-size bitmap.
+         * Sanitizing and syncing a large JPEG can take seconds, so it runs into a uniquely named pending file
+         * without the media lock (which also guards image lookups made while drawing). Only the quota check
+         * and the publishing rename hold the lock.
+         */
+        internal fun finishCapture(directory: File, raw: File): JsonObject {
             require(raw.canonicalFile.parentFile == directory.canonicalFile && raw.name.startsWith(".capture-"))
             check(directory.isDirectory && raw.isFile) { "Capture cancelled" }
             val asset = "${UUID.randomUUID()}.jpg"
             val output = File(directory, ".$asset.pending")
-            try {
+            return try {
                 check(raw.length() in 1..MAX_RAW_BYTES) { "Photo exceeds the 256 MiB file limit. Choose a lower JPEG quality or resolution." }
                 val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(raw.path, dimensions)
@@ -151,8 +163,11 @@ class ProjectMedia(context: Context) {
                     file.fd.sync()
                 }
                 check(output.length() in 1..MAX_PHOTO_BYTES) { "Photo exceeds the 256 MiB file limit. Choose a lower JPEG quality." }
-                checkQuota(directory, output.length(), addingPhoto = true)
-                check(output.renameTo(File(directory, asset))) { "Could not save captured photo" }
+                synchronized(lock) {
+                    check(directory.isDirectory && output.isFile) { "Capture cancelled" }
+                    checkQuota(directory, output.length(), addingPhoto = true)
+                    check(output.renameTo(File(directory, asset))) { "Could not save captured photo" }
+                }
                 val swap = orientation in 5..8
                 JsonObject().apply {
                     addProperty("asset", asset)

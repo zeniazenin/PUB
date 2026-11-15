@@ -40,6 +40,8 @@ With your own Android toolchain, use `gradlew.bat` and set `JAVA_HOME`, `ANDROID
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
+Debug builds are unoptimized and debuggable, so they are not representative of performance. To check speed on a phone, build the R8-optimized `benchmark` variant (signed with the local debug key; never publish it): `.\tools\dev.ps1 :app:assembleBenchmark`, then install `app/build/outputs/apk/benchmark/app-benchmark.apk`. `release` is optimized the same way but needs your own signing configuration.
+
 ```powershell
 .\.toolchain\android-sdk\platform-tools\adb.exe install -r app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk
 .\.toolchain\android-sdk\platform-tools\adb.exe shell am instrument -w -r app.pub.test/androidx.test.runner.AndroidJUnitRunner

@@ -24,7 +24,8 @@ data class ModelChoice(val id: String, val name: String)
 class ChatGptAuth(context: Context) {
     private val vault = SecureSession(context)
     private val prefs = context.getSharedPreferences("chatgpt.host", Context.MODE_PRIVATE)
-    private val hostId = prefs.getString("id", null) ?: "urn:uuid:${UUID.randomUUID()}".also { prefs.edit().putString("id", it).commit() }
+    // Only needed for sign-in, which runs off the main thread; avoids a synchronous commit at construction.
+    private val hostId by lazy { prefs.getString("id", null) ?: "urn:uuid:${UUID.randomUUID()}".also { prefs.edit().putString("id", it).commit() } }
     private val http = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
         .callTimeout(180, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build()
     // Streamed generation/review: callTimeout covers the whole stream, and reasoning models can be silent
@@ -37,7 +38,23 @@ class ChatGptAuth(context: Context) {
     @Volatile private var reviewCall: Call? = null
     @Volatile private var cancelled = false
     @Volatile var foreground = false
-    @Volatile private var session: JsonObject? = vault.read()?.let { runCatching { JsonParser.parseString(it).asJsonObject }.getOrNull() }
+    // Decrypting the stored session makes Keystore IPC calls, so it is loaded on first use (normally off the
+    // main thread) rather than at construction. A separate lock keeps it independent of @Synchronized calls,
+    // which can block for minutes during sign-in.
+    private val sessionLock = Any()
+    @Volatile private var sessionValue: JsonObject? = null
+    @Volatile private var sessionLoaded = false
+    private var session: JsonObject?
+        get() {
+            if (!sessionLoaded) synchronized(sessionLock) {
+                if (!sessionLoaded) {
+                    sessionValue = vault.read()?.let { runCatching { JsonParser.parseString(it).asJsonObject }.getOrNull() }
+                    sessionLoaded = true
+                }
+            }
+            return sessionValue
+        }
+        set(value) { synchronized(sessionLock) { sessionValue = value; sessionLoaded = true } }
     fun imageToolsUnavailable(): Boolean = prefs.getBoolean("image-tools-blocked", false)
     fun accountLabel(): String? = session?.get("email")?.asString
     fun cancel() { cancelled = true; runCatching { listener?.close() }; generateCall?.cancel(); imageCall?.cancel(); reviewCall?.cancel(); http.dispatcher.cancelAll() }

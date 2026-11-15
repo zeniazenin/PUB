@@ -38,6 +38,7 @@ class PlatformHardware(
     @Volatile private var closed = false
     private var lastInfraredMs = -1000L
     private var activeTorch: String? = null
+    private var torchCameraId: String? = null
     private val sensorStreams = mutableMapOf<String, SensorStream>()
     private var locationListener: LocationListener? = null
     private var locationCancellation: CancellationSignal? = null
@@ -298,10 +299,12 @@ class PlatformHardware(
         val enabled = value.asBoolean
         if (!enabled) { stopTorch(); emit("torch.changed", JsonObject().apply { addProperty("enabled", false) }); return }
         val manager = cameras ?: run { emit("error", error("unavailable", "Camera flash is not available.")); return }
-        val cameraId = manager.cameraIdList.firstOrNull {
+        // Found once per session instead of reading every camera's characteristics on each "on".
+        val cameraId = torchCameraId ?: (manager.cameraIdList.firstOrNull {
             val c = manager.getCameraCharacteristics(it)
             c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true && c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-        } ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
+        } ?: manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true })
+            ?.also { torchCameraId = it }
         if (cameraId == null) { emit("error", error("unavailable", "This phone has no usable torch.")); return }
         manager.setTorchMode(cameraId, true); activeTorch = cameraId
         emit("torch.changed", JsonObject().apply { addProperty("enabled", true) })

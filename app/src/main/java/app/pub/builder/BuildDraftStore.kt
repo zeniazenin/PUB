@@ -51,20 +51,32 @@ class BuildDraftStore(context: Context) {
             val bytes = json.toString().toByteArray(Charsets.UTF_8)
             require(bytes.size <= MAX_SNAPSHOT_BYTES) { "Snapshot size limit" }
             // Validate the proposed state and the old file before beginning an atomic replacement.
-            decode(json)
-            readLocked()
+            // The bundles come from already-validated ProjectBundles, so only the snapshot fields are
+            // rechecked; and the old file is reread only if it changed since this process validated it.
+            decode(json, parseBundles = false)
+            val path = file.baseFile.path
+            if (verified[path].let { it == null || it != FileSignature.of(file.baseFile) }) readLocked()
             val stream = file.startWrite()
             try { stream.write(bytes); file.finishWrite(stream) }
             catch (error: Exception) { file.failWrite(stream); throw error }
+            FileSignature.of(file.baseFile)?.let { verified[path] = it } ?: verified.remove(path)
         }
     }
     fun clear() = synchronized(lock) {
+        verified.remove(file.baseFile.path)
         guarded("The saved builder draft could not be cleared.") {
             file.delete()
             check(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists() && !File(file.baseFile.path + ".new").exists())
         }
     }
     private fun readLocked(): BuildDraftSnapshot? {
+        val path = file.baseFile.path
+        verified.remove(path)
+        val snapshot = readFile()
+        FileSignature.of(file.baseFile)?.let { verified[path] = it }
+        return snapshot
+    }
+    private fun readFile(): BuildDraftSnapshot? {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return null
         val bytes = file.openRead().use { input ->
             require(input.channel.size() <= MAX_SNAPSHOT_BYTES) { "Snapshot size limit" }
@@ -103,7 +115,10 @@ class BuildDraftStore(context: Context) {
         require(text.toByteArray(Charsets.UTF_8).size <= ProjectBundle.MAX_PACKAGE_BYTES)
         return JsonParser.parseString(text).asJsonObject
     }
-    private fun decode(root: JsonObject): BuildDraftSnapshot {
+    private fun decode(root: JsonObject, parseBundles: Boolean = true): BuildDraftSnapshot {
+        val bundleOf: (JsonElement) -> ProjectBundle = if (parseBundles) ::decodeBundle else { value ->
+            require(value.isJsonObject); PLACEHOLDER_BUNDLE
+        }
         require(root.keySet() == FIELDS) { "Unexpected draft fields" }
         require(integer(root, "version") == 1) { "Unsupported draft version" }
         val session = string(root, "sessionId", 36).also { require(validUuid(it)) }
@@ -115,10 +130,10 @@ class BuildDraftStore(context: Context) {
                 val project = value.asJsonObject
                 require(project.keySet() == setOf("id", "bundle"))
                 val id = string(project, "id", 36).also { require(it == "guitar-tuner" || validUuid(it)) }
-                SavedProject(id, decodeBundle(project["bundle"]))
+                SavedProject(id, bundleOf(project["bundle"]))
             }
         }
-        val draft = root["draft"].let { if (it.isJsonNull) null else decodeBundle(it) }
+        val draft = root["draft"].let { if (it.isJsonNull) null else bundleOf(it) }
         require(root["running"].isJsonPrimitive && root["running"].asJsonPrimitive.isBoolean)
         return BuildDraftSnapshot(string(root, "prompt", 8000), session, editing, draft, history,
             string(root, "draftRequest", 8000), string(root, "draftModel", 200), pass,
@@ -169,6 +184,10 @@ class BuildDraftStore(context: Context) {
         const val MAX_SNAPSHOT_BYTES = 40 * 1024 * 1024
         private val FIELDS = setOf("version", "prompt", "sessionId", "editingProject", "draft", "draftHistoryId", "draftRequest", "draftModel", "repairPass", "message", "visualReview", "visualReviewError", "running")
         private val lock = Any()
+        // Per file path: the version of the snapshot file this process last read or wrote successfully.
+        private val verified = mutableMapOf<String, FileSignature>()
+        // Stands in for an already-validated bundle while checking the other snapshot fields before a write.
+        private val PLACEHOLDER_BUNDLE by lazy { ProjectBundle.parse("""{"name":"x","description":"","source":"x","capabilities":[]}""") }
         private fun validUuid(value: String) = runCatching { UUID.fromString(value).toString() == value }.getOrDefault(false)
     }
 }

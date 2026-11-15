@@ -1,5 +1,6 @@
 package app.pub.core;
 
+import java.util.regex.Pattern;
 import com.google.gson.*;
 import java.util.Base64;
 import java.util.HashSet;
@@ -15,7 +16,11 @@ public final class GraphicAsset {
     private static final Set<String> STYLE = Set.of("id", "type", "fill", "stroke", "strokeWidth");
     private GraphicAsset() {}
 
-    public static boolean validId(String id) { return id != null && id.matches("[a-zA-Z0-9_-]{1,40}"); }
+    // Precompiled: these run for every UI packet node, vector shape and PNG chunk (String.matches recompiles).
+    private static final Pattern ID = Pattern.compile("[a-zA-Z0-9_-]{1,40}");
+    private static final Pattern HEX_COLOR = Pattern.compile("#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})");
+    private static final Pattern CHUNK_TYPE = Pattern.compile("[a-zA-Z]{4}");
+    public static boolean validId(String id) { return id != null && ID.matcher(id).matches(); }
 
     public static void validate(JsonObject asset) {
         if (asset == null) throw bad("Missing graphic asset");
@@ -81,7 +86,7 @@ public final class GraphicAsset {
         keys(shape, allowed);
         for (String key : Set.of("fill", "stroke")) if (shape.has(key)) {
             String color = text(shape, key, 16);
-            if (!COLORS.contains(color) && !color.matches("#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})")) throw bad("Invalid graphic color");
+            if (!COLORS.contains(color) && !HEX_COLOR.matcher(color).matches()) throw bad("Invalid graphic color");
         }
         if (shape.has("strokeWidth")) number(shape, "strokeWidth", 0, 20);
     }
@@ -102,7 +107,7 @@ public final class GraphicAsset {
             if (lengthLong > bytes.length - offset - 12L) throw bad("Truncated PNG chunk");
             int length = (int) lengthLong;
             String kind = new String(bytes, offset + 4, 4, java.nio.charset.StandardCharsets.US_ASCII);
-            if (!kind.matches("[a-zA-Z]{4}")) throw bad("Invalid PNG chunk type");
+            if (!CHUNK_TYPE.matcher(kind).matches()) throw bad("Invalid PNG chunk type");
             CRC32 crc = new CRC32(); crc.update(bytes, offset + 4, length + 4);
             if (crc.getValue() != uint(bytes, offset + 8 + length)) throw bad("PNG checksum mismatch");
             if (!header && !kind.equals("IHDR")) throw bad("Missing PNG header");

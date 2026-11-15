@@ -38,11 +38,13 @@ class LauncherEditingTest {
         """.trimIndent())
     }.toString())
     private fun ready() { compose.waitUntil(15000) { host.ui != null || host.failure != null }; compose.runOnIdle { assertNull(host.failure) } }
+    /** Saving runs off the main thread; wait until the saved app has reopened. */
+    private fun save() { compose.runOnIdle { host.savePreview() }; compose.waitUntil(15000) { !host.savingPreview && (!host.preview || host.failure != null) }; ready() }
     private fun fixture(): SavedProject {
         compose.runOnIdle { host.previewProject(bundle()) };ready()
         compose.runOnIdle { host.action("add") }
         compose.waitUntil(10000) { host.ui.toString().contains("Original 1") }
-        compose.runOnIdle { host.savePreview() };ready()
+        save()
         lateinit var project: SavedProject
         compose.runOnIdle { project=host.projects.first { it.id==host.projectId };host.closeProject() }
         return project
@@ -89,7 +91,7 @@ class LauncherEditingTest {
             compose.runOnIdle { host.previewProject(bundle("Edited"),project) };ready()
             compose.runOnIdle { host.action("add") }
             compose.waitUntil(10000) { host.ui.toString().contains("Edited 2") }
-            compose.runOnIdle { host.savePreview() };ready()
+            save()
             compose.runOnIdle {
                 assertEquals(project.id,host.projectId);assertFalse(host.preview)
                 assertTrue(host.ui.toString().contains("Edited 1"))

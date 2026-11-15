@@ -101,7 +101,21 @@ class PromptHistoryStore(context: Context) {
         write(recovered)
         recovered
     }
+    /**
+     * Every mutation used to reread and revalidate the whole journal, and the controller reread it again
+     * to refresh its list. The parsed list is now reused while the file is the version this process last
+     * read or wrote; any other change to the file (or an AtomicFile backup) forces a full validated read.
+     */
     private fun read(): List<PromptHistoryEntry> {
+        val path = file.baseFile.path
+        val signature = FileSignature.of(file.baseFile)
+        cache[path]?.takeIf { signature != null && it.first == signature }?.let { return it.second }
+        cache.remove(path)
+        val entries = readFile()
+        FileSignature.of(file.baseFile)?.let { cache[path] = it to entries }
+        return entries
+    }
+    private fun readFile(): List<PromptHistoryEntry> {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return emptyList()
         val text = file.openRead().use { input ->
             val bytes = ByteArrayOutputStream(); val buffer = ByteArray(8192)
@@ -169,9 +183,12 @@ class PromptHistoryStore(context: Context) {
         }
         val bytes = root.toString().toByteArray(Charsets.UTF_8)
         if (bytes.size > MAX_FILE_BYTES) throw PromptHistoryFullException()
+        val path = file.baseFile.path
+        cache.remove(path)
         val stream = file.startWrite()
         try { stream.write(bytes); file.finishWrite(stream) }
         catch (error: Exception) { file.failWrite(stream); throw error }
+        FileSignature.of(file.baseFile)?.let { cache[path] = it to entries.toList() }
     }
     companion object {
         const val MAX_ENTRIES = 200
@@ -180,6 +197,8 @@ class PromptHistoryStore(context: Context) {
         private const val MAX_FILE_BYTES = 10_500_000
         private val STATUSES = setOf("building", "ready", "failed", "cancelled", "saved")
         private val lock = Any()
+        // Per file path, guarded by [lock]: the last validated entries and the file version they came from.
+        private val cache = mutableMapOf<String, Pair<FileSignature, List<PromptHistoryEntry>>>()
         private fun validUuid(value: String) = runCatching { UUID.fromString(value).toString() == value }.getOrDefault(false)
         private fun validProjectId(value: String) = value == "guitar-tuner" || validUuid(value)
     }

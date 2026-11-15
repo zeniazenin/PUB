@@ -75,7 +75,10 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
     var historyProject by rememberSaveable { mutableStateOf<String?>(null) }
     val context=LocalContext.current
     val density=LocalDensity.current
-    val keyboardInset=(WindowInsets.ime.getBottom(density)-WindowInsets.navigationBars.getBottom(density)).coerceAtLeast(0)
+    // Read inset values only inside the size callback: reading them here would recompose the whole app
+    // on every frame of the keyboard animation.
+    val imeInsets=WindowInsets.ime
+    val navigationInsets=WindowInsets.navigationBars
     var pendingBuildContext by rememberSaveable {mutableStateOf<String?>(null)}
     val notificationPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         pendingBuildContext?.let {requestContext -> pendingBuildContext=null;builder.generate(requestContext)}
@@ -90,8 +93,11 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
     LaunchedEffect(openBuildSignal) {if(openBuildSignal>0) {model.closeProject();destination="builder"}}
     var deleteTarget by remember { mutableStateOf<SavedProject?>(null) }
     val closeProject = {
-        if (!model.preview) destination = "launcher"
-        model.closeProject()
+        // Closing discards the preview's photos, which an in-progress save is still copying.
+        if (!model.savingPreview) {
+            if (!model.preview) destination = "launcher"
+            model.closeProject()
+        }
     }
     val openSettings = { settingsReturn = destination; destination = "settings" }
     val back = {
@@ -117,10 +123,10 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
             Column(Modifier.safeDrawingPadding().fillMaxSize()) {
                 if (model.projectOpen) {
                     RunningAppScreen(model, closeProject) {
-                        val historyId = model.previewHistoryId
-                        model.savePreview()
-                        if (!model.preview && model.projectOpen) builder.markSaved(historyId, model.projectId, model.projectName)
-                        if (!model.preview && model.projectOpen) builder.beginEdit(model.editableProject(model.projectId))
+                        model.savePreview { historyId, saved ->
+                            builder.markSaved(historyId, saved.id, saved.bundle.name)
+                            builder.beginEdit(saved)
+                        }
                     }
                 } else {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -141,7 +147,10 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                             Text(if(builder.buildInProgress) "Build in progress - view status" else "View build result")
                         }
                     }
-                    Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged {model.updateBuilderViewport(it.width,it.height+keyboardInset)}) {
+                    Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged {
+                        val keyboardInset=(imeInsets.getBottom(density)-navigationInsets.getBottom(density)).coerceAtLeast(0)
+                        model.updateBuilderViewport(it.width,it.height+keyboardInset)
+                    }) {
                         when (destination) {
                             "launcher" -> LauncherScreen(model,
                                 onEdit = { builder.beginEdit(it); destination = "builder" },
@@ -203,7 +212,7 @@ private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, sa
             Text(model.projectName, style=MaterialTheme.typography.titleLarge, maxLines=1, overflow=TextOverflow.Ellipsis)
             if(model.preview) Text("Preview", color=MaterialTheme.colorScheme.primary, style=MaterialTheme.typography.labelMedium)
         }
-        TextButton(onClick=close, modifier=Modifier.testTag("close-app").semantics { contentDescription="Close app" }) { Text("✕  Close") }
+        TextButton(onClick=close, enabled=!model.savingPreview, modifier=Modifier.testTag("close-app").semantics { contentDescription="Close app" }) { Text("✕  Close") }
     }
     HorizontalDivider()
     if (model.hardwareAccessEnabled) Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -218,7 +227,9 @@ private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, sa
     }
     if (model.preview) Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
         Text(if (model.previewEditTarget != null) "Save changes updates the app code. Your existing saved data and photos are kept; preview changes are discarded." else "Try it before saving. Closing discards preview changes.",modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
-        Button(onClick=save,enabled=model.ui!=null && model.failure==null,modifier=Modifier.testTag("save-preview")) { Text(if (model.previewEditTarget != null) "Save changes" else "Save locally") }
+        Button(onClick=save,enabled=model.ui!=null && model.failure==null && !model.savingPreview,modifier=Modifier.testTag("save-preview")) {
+            Text(if (model.savingPreview) "Saving…" else if (model.previewEditTarget != null) "Save changes" else "Save locally")
+        }
     }
     key(model.projectId) {
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp).testTag("running-app"),verticalArrangement=Arrangement.spacedBy(16.dp)) {

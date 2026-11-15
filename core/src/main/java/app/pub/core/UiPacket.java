@@ -8,6 +8,7 @@ public final class UiPacket {
     public final JsonObject ui;
     public final JsonArray effects;
     private static final Set<String> TYPES = Set.of("column", "text", "meter", "choices", "button", "input", "image", "graphic");
+    private static final Set<String> GRAPHIC_FIELDS = Set.of("type", "asset", "description", "highlight");
     private static final Set<String> EFFECTS = Set.of("microphone.start", "microphone.stop", "settings.save", "storage.save", "hardware.request");
     private UiPacket(JsonObject ui, JsonArray effects) { this.ui = ui; this.effects = effects; }
     public static UiPacket parse(String input) {
@@ -32,7 +33,7 @@ public final class UiPacket {
         switch (type) {
             case "graphic":
                 if (++count[1] > 4) throw new IllegalArgumentException("Too many images");
-                for (String key : node.keySet()) if (!Set.of("type", "asset", "description", "highlight").contains(key)) throw new IllegalArgumentException("Unknown graphic UI field");
+                for (String key : node.keySet()) if (!GRAPHIC_FIELDS.contains(key)) throw new IllegalArgumentException("Unknown graphic UI field");
                 if (!GraphicAsset.validId(text(node, "asset", 40))) throw new IllegalArgumentException("Invalid graphic asset identifier");
                 if (text(node, "description", 200).isBlank()) throw new IllegalArgumentException("Graphic description required");
                 if (node.has("highlight")) {

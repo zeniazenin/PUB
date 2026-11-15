@@ -47,7 +47,8 @@ public final class ProjectBundle {
     }
     /** Include asset definitions/prompts in edits, never binary image content. */
     public String toPromptJson() {
-        JsonObject o=JsonParser.parseString(toJson()).getAsJsonObject();
+        // Built from a fresh tree rather than serializing and reparsing the package (image data included).
+        JsonObject o=toJsonObject();
         if(o.has("assets")) for(var entry:o.getAsJsonObject("assets").entrySet()) entry.getValue().getAsJsonObject().remove("data");
         return o.toString();
     }
@@ -57,8 +58,9 @@ public final class ProjectBundle {
             if("image".equals(asset.get("type").getAsString()) && !asset.has("data")) throw new IllegalStateException("Image generation did not complete for " + entry.getKey());
         }
     }
-    public String toJson() {
+    public String toJson() { return toJsonObject().toString(); }
+    private JsonObject toJsonObject() {
         JsonObject o=new JsonObject(); o.addProperty("name",name);o.addProperty("description",description);o.addProperty("source",source);
-        JsonArray a=new JsonArray(); capabilities.stream().sorted().forEach(a::add);o.add("capabilities",a); if(!assets.isEmpty())o.add("assets",assets.deepCopy()); if(icon!=null)o.addProperty("icon",icon);return o.toString();
+        JsonArray a=new JsonArray(); capabilities.stream().sorted().forEach(a::add);o.add("capabilities",a); if(!assets.isEmpty())o.add("assets",assets.deepCopy()); if(icon!=null)o.addProperty("icon",icon);return o;
     }
 }

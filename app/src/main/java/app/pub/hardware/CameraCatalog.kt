@@ -25,33 +25,34 @@ internal data class CameraLens(
         CameraCharacteristics.LENS_FACING_BACK -> "back"
         else -> "external"
     }
-    val focalLengths get() = characteristics[CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS]?.toList().orEmpty()
-    val label get() = buildString {
+    // Lazy: the capture dialog reads these on every recomposition, including each frame of a slider drag.
+    val focalLengths by lazy { characteristics[CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS]?.toList().orEmpty() }
+    val label by lazy { buildString {
         append(facing.replaceFirstChar { it.uppercase() })
         append(if (physicalId == null) " · camera $logicalId" else " · lens $physicalId via $logicalId")
         if (focalLengths.isNotEmpty()) append(" · " + focalLengths.joinToString("/") { String.format(Locale.US, "%.1f", it) } + " mm")
         if (physicalId == null && characteristics.physicalCameraIds.isNotEmpty()) append(" · automatic lens")
-    }
-    val sizes: List<Size> get() {
+    } }
+    val sizes: List<Size> by lazy {
         val streams = characteristics[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]
-        return (streams?.getOutputSizes(ImageFormat.JPEG).orEmpty().toList() +
+        (streams?.getOutputSizes(ImageFormat.JPEG).orEmpty().toList() +
             streams?.getHighResolutionOutputSizes(ImageFormat.JPEG).orEmpty().toList())
             .distinct().sortedByDescending { it.width.toLong() * it.height }
     }
     val flash get() = characteristics[CameraCharacteristics.FLASH_INFO_AVAILABLE] == true
-    private val requestKeys get() = characteristics.availableCaptureRequestKeys.orEmpty().map { it.name }.toSet()
+    private val requestKeys by lazy { characteristics.availableCaptureRequestKeys.orEmpty().map { it.name }.toSet() }
     fun supports(vararg keys: CaptureRequest.Key<*>): Boolean = keys.all {
         it.name in requestKeys && (physicalId == null || it.name in physicalRequestKeys)
     }
-    val manualExposure get() = characteristics[CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES]
+    val manualExposure by lazy { characteristics[CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES]
         ?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true &&
         supports(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.SENSOR_SENSITIVITY, CaptureRequest.SENSOR_EXPOSURE_TIME) &&
-        characteristics[CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES]?.contains(CaptureRequest.CONTROL_AE_MODE_OFF) == true
-    val manualFocus get() = (characteristics[CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE] ?: 0f) > 0 &&
+        characteristics[CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES]?.contains(CaptureRequest.CONTROL_AE_MODE_OFF) == true }
+    val manualFocus by lazy { (characteristics[CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE] ?: 0f) > 0 &&
         supports(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.LENS_FOCUS_DISTANCE) &&
-        characteristics[CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES]?.contains(CaptureRequest.CONTROL_AF_MODE_OFF) == true
-    val whiteBalanceModes get() = if (supports(CaptureRequest.CONTROL_AWB_MODE))
-        characteristics[CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES]?.filter { it != CaptureRequest.CONTROL_AWB_MODE_OFF }.orEmpty() else emptyList()
+        characteristics[CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES]?.contains(CaptureRequest.CONTROL_AF_MODE_OFF) == true }
+    val whiteBalanceModes by lazy { if (supports(CaptureRequest.CONTROL_AWB_MODE))
+        characteristics[CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES]?.filter { it != CaptureRequest.CONTROL_AWB_MODE_OFF }.orEmpty() else emptyList() }
 }
 
 internal object CameraCatalog {

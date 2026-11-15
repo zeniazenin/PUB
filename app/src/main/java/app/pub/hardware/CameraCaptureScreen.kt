@@ -85,19 +85,24 @@ fun CameraCaptureScreen(directory: File, onResult: (JsonObject) -> Unit, onDismi
     DisposableEffect(session) {
         val future = ProcessCameraProvider.getInstance(context.applicationContext)
         future.addListener({
-            if (session.active.get()) {
-                runCatching {
-                    val cameraProvider = future.get()
-                    val lenses = CameraCatalog.lenses(context.applicationContext)
-                    availableLenses = lenses
-                    availableLogicalIds = cameraProvider.availableCameraInfos.map { Camera2CameraInfo.from(it).cameraId }.toSet()
-                    if (lenses.isEmpty()) error = "Android did not expose any usable cameras."
-                    else selectedKey = (lenses.firstOrNull { it.facing == "back" && it.physicalId == null && it.logicalId in availableLogicalIds }
-                        ?: lenses.first()).key
-                    provider = cameraProvider
-                }.onFailure { error = "Camera could not start. Close this screen and check camera access in Settings." }
+            // Reading every camera's characteristics (and extension support) is a series of binder calls;
+            // do it on the session worker, then apply the result on the main thread.
+            val listed = if (session.active.get()) runCatching { CameraCatalog.lenses(context.applicationContext) } else null
+            main.execute {
+                if (session.active.get() && listed != null) {
+                    runCatching {
+                        val cameraProvider = future.get()
+                        val lenses = listed.getOrThrow()
+                        availableLenses = lenses
+                        availableLogicalIds = cameraProvider.availableCameraInfos.map { Camera2CameraInfo.from(it).cameraId }.toSet()
+                        if (lenses.isEmpty()) error = "Android did not expose any usable cameras."
+                        else selectedKey = (lenses.firstOrNull { it.facing == "back" && it.physicalId == null && it.logicalId in availableLogicalIds }
+                            ?: lenses.first()).key
+                        provider = cameraProvider
+                    }.onFailure { error = "Camera could not start. Close this screen and check camera access in Settings." }
+                }
             }
-        }, main)
+        }, session.worker)
         onDispose {
             session.active.set(false)
             session.pending.getAndSet(null)?.delete()

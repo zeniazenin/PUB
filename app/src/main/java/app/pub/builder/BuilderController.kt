@@ -60,7 +60,9 @@ class BuilderController(private val application: Application, private val backen
         if (busy != null && busy != "Loading available models…") { operationEpoch++; auth.cancel(); job?.cancel(); busy = null }
     }
     override var imageToolsUnavailable by mutableStateOf(auth.imageToolsUnavailable()); private set
-    override var account by mutableStateOf(auth.accountLabel()); private set
+    // Loaded in the background at startup (decrypting the session uses Keystore IPC).
+    override var account by mutableStateOf<String?>(null); private set
+    private suspend fun loadAccount() { account=withContext(Dispatchers.IO) { runCatching { auth.accountLabel() }.getOrNull() } }
     override var models by mutableStateOf(emptyList<ModelChoice>()); private set
     override var selectedModel by mutableStateOf(backend?.initialModel ?: ""); private set
     override var automaticModelSelection by mutableStateOf(prefs.getString("preferred_model", null)==null); private set
@@ -75,6 +77,7 @@ class BuilderController(private val application: Application, private val backen
     private var historyRefreshEpoch=0L
     init {
         if(backgroundManaged) scope.launch {
+            loadAccount()
             try {
                 val saved=withContext(Dispatchers.IO) {draftStore.read()}
                 saved?.let {restore(it)}
@@ -91,7 +94,7 @@ class BuilderController(private val application: Application, private val backen
                 try {loadModels()} catch(e:Exception) {modelSelectionNote="Could not refresh models. Retry in Settings; saved previews remain available."}
             }
             restoring=false;busy=null
-        } else refreshHistory()
+        } else { refreshHistory(); scope.launch { loadAccount() } }
         if(backgroundManaged) scope.launch {
             snapshotFlow { if(buildInProgress && busy==null) capturePending else null }.collect { capture ->
                 if(capture!=null && !capturing) {
@@ -360,13 +363,15 @@ class BuilderController(private val application: Application, private val backen
                         }
                         currentCoroutineContext().ensureActive()
                         reloadHistory()
-                        val repaired=network {
-                            backend?.generate(capture.model,instruction,context,capture.bundle)
+                        // Comparing serializes both whole packages (images included), so it runs off the main thread.
+                        val (repaired,changed)=network {
+                            val result=backend?.generate(capture.model,instruction,context,capture.bundle)
                                 ?: generator.generate(capture.model,instruction,context,capture.bundle)
+                            result to (result.toJson()!=capture.bundle.toJson())
                         }
                         repaired.requireReadyAssets()
                         check(capture.bundle.capabilities.containsAll(repaired.capabilities)) { "Automatic repair requested additional permissions. Your previous draft has been kept." }
-                        check(repaired.toJson()!=capture.bundle.toJson()) { "Automatic repair made no changes. Your previous draft has been kept." }
+                        check(changed) { "Automatic repair made no changes. Your previous draft has been kept." }
                         check(historyOutcome(repairHistoryId,"ready",repaired.name)) { "Could not save repair history. Your previous draft has been kept." }
                         currentCoroutineContext().ensureActive()
                         draft=repaired;draftHistoryId=repairHistoryId;draftRepairPass=next

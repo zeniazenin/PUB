@@ -18,9 +18,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import app.pub.HostModel
 import app.pub.builder.BuilderModel
 import app.pub.core.ProjectBundle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Content for the host's scrollable builder screen; account/model controls live in Settings. */
 @Composable
@@ -34,6 +42,21 @@ fun BuilderScreen(
 ) {
     val focus=LocalFocusManager.current
     val keyboard=LocalSoftwareKeyboardController.current
+    // The generation context includes a hardware inventory scan; build it off the main thread, then start.
+    val scope=rememberCoroutineScope()
+    var preparing by remember { mutableStateOf(false) }
+    val startWithContext: ((String)->Unit)->Unit = { start ->
+        focus.clearFocus();keyboard?.hide()
+        if(!preparing) {
+            preparing=true
+            val editing=builder.editingProject?.id
+            scope.launch {
+                val context=withContext(Dispatchers.IO) { runCatching { host.generationContext(editing) } }
+                preparing=false
+                context.onSuccess(start)
+            }
+        }
+    }
     Text(builder.editingProject?.let { "Edit ${it.bundle.name}" } ?: "Describe it. Make it yours.", style = MaterialTheme.typography.headlineSmall)
     Text(if (builder.editingProject != null) "Describe what to change. PUB uses the current app code as context. Preview before saving; your existing data and photos stay on your phone." else "Tell PUB what you need, try the result, and keep it on your phone.")
 
@@ -70,8 +93,8 @@ fun BuilderScreen(
         globallyBlocked = host.globalBlocked
     )
     Button(
-        onClick = { focus.clearFocus(); keyboard?.hide(); onGenerate(host.generationContext(builder.editingProject?.id)) },
-        enabled = builder.account != null && builder.selectedModel.isNotBlank() &&
+        onClick = { startWithContext(onGenerate) },
+        enabled = builder.account != null && builder.selectedModel.isNotBlank() && !preparing &&
             builder.prompt.isNotBlank() && builder.busy == null && builder.capturePending == null && !builder.buildInProgress,
         modifier = Modifier.fillMaxWidth()
     ) { Text(if (builder.editingProject != null) "Generate changes" else "Generate app") }
@@ -100,7 +123,7 @@ fun BuilderScreen(
                 if (!draft.assets.isEmpty) Text("Graphics: ${draft.assets.size()} local assets")
                 Text("Requested access: " + draft.capabilities.joinToString().ifBlank { "none" })
                 Button(onClick = { onPreview(draft) }, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Preview app") }
-                if(builder.visualReviewError!=null) TextButton(onClick={focus.clearFocus();keyboard?.hide();builder.retryVisualReview(host.generationContext(builder.editingProject?.id))},enabled=builder.busy==null) {Text("Retry visual review")}
+                if(builder.visualReviewError!=null) TextButton(onClick={startWithContext(builder::retryVisualReview)},enabled=builder.busy==null && !preparing) {Text("Retry visual review")}
                 TextButton(onClick = builder::clearDraft, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Discard draft") }
             }
         }

@@ -104,7 +104,7 @@ private fun LauncherTile(id: String, name: String, tuner: Boolean = false, graph
     ) {
         Box(Modifier.size(80.dp).clip(RoundedCornerShape(24.dp)).background(iconBackground), contentAlignment = Alignment.Center) {
             when {
-                graphic != null -> NativeGraphic(graphic, "$name icon", modifier=Modifier.size(68.dp))
+                graphic != null -> NativeGraphic(graphic, "$name icon", modifier=Modifier.size(68.dp), maxDecodeSize=256)
                 tuner -> TunerGlyph(tint, iconBackground)
                 calculator -> CalculatorGlyph(tint)
                 else -> Text(monogram.uppercase(), color = tint, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Medium)

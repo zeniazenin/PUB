@@ -23,7 +23,12 @@ public final class PitchDetector {
         if (rms < 0.004) return new Result(0, 0, rms);
         int window = samples.length - maxTau - 1;
         difference[0] = 1;
+        // The normalized difference at tau only depends on smaller lags, so lags are computed in order and
+        // the search stops at the first accepted dip once it stops descending (plus one lag for the
+        // parabolic interpolation). Results are identical to computing every lag; higher strings, whose
+        // dip comes early, cost a fraction of the full O(window * maxTau) scan.
         double sum = 0;
+        int found = -1;
         for (int tau = 1; tau <= maxTau + 1; tau++) {
             double d = 0;
             for (int i = 0; i < window; i++) {
@@ -32,17 +37,17 @@ public final class PitchDetector {
             }
             sum += d;
             difference[tau] = sum == 0 ? 1 : d * tau / sum;
-        }
-        for (int tau = minTau; tau <= maxTau; tau++) {
-            if (difference[tau] < 0.15) {
-                while (tau < maxTau && difference[tau + 1] < difference[tau]) tau++;
-                double a = difference[tau - 1], b = difference[tau], c = difference[tau + 1];
-                double divisor = a - 2 * b + c;
-                double offset = Math.abs(divisor) < 1e-12 ? 0 : 0.5 * (a - c) / divisor;
-                offset = Math.max(-0.5, Math.min(0.5, offset));
-                return new Result(sampleRate / (tau + offset), Math.max(0, 1 - b), rms);
+            int previous = tau - 1;
+            if (found < 0 && previous >= minTau && previous <= maxTau && difference[previous] < 0.15) found = previous;
+            if (found >= 0 && found == previous) {
+                if (found < maxTau && difference[tau] < difference[found]) found = tau; else break;
             }
         }
-        return new Result(0, 0, rms);
+        if (found < 0) return new Result(0, 0, rms);
+        double a = difference[found - 1], b = difference[found], c = difference[found + 1];
+        double divisor = a - 2 * b + c;
+        double offset = Math.abs(divisor) < 1e-12 ? 0 : 0.5 * (a - c) / divisor;
+        offset = Math.max(-0.5, Math.min(0.5, offset));
+        return new Result(sampleRate / (found + offset), Math.max(0, 1 - b), rms);
     }
 }

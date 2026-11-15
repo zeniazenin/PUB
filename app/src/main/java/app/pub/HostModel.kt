@@ -10,6 +10,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import app.pub.core.PermissionPolicy.Rule
 import app.pub.hardware.*
 import app.pub.core.HardwareContract
@@ -30,14 +34,36 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     private val permissionPrefs = context.getSharedPreferences("permissions", Context.MODE_PRIVATE)
     private val store = ProjectStore(context)
     private val projectPrefs get() = context.getSharedPreferences("project.$projectId", Context.MODE_PRIVATE)
-    var projects by mutableStateOf(store.list().filter { it.id != "guitar-tuner" })
+    // Loaded off the main thread: listing parses (and validates) every saved package, including image data.
+    var projects by mutableStateOf(emptyList<SavedProject>())
         private set
+    private var projectsEpoch = 0L
+    /** Rereads the library in the background; only the most recently requested result is published. */
+    private fun refreshProjects() {
+        val epoch = ++projectsEpoch
+        viewModelScope.launch {
+            val loaded = runCatching { withContext(Dispatchers.IO) { store.list().filter { it.id != "guitar-tuner" } } }.getOrNull() ?: return@launch
+            if (epoch == projectsEpoch) { projects = loaded; syncPolicies() }
+        }
+    }
     var tunerVisible by mutableStateOf(!prefs.getBoolean("tuner.deleted", false)); private set
     var previewHistoryId: String? = null; private set
     fun graphicAsset(id: String): JsonObject? = selectedBundle?.assets?.get(id)?.asJsonObject
     var previewEditTarget by mutableStateOf<SavedProject?>(null); private set
     private var originalTuner: SavedProject? = null
+    // The launcher asks for the tuner on every composition. Cache its stored override (an edited tuner)
+    // instead of rereading and reparsing the file each time; saves and deletes update the cache.
+    private var tunerOverride: SavedProject? = null
+    private var tunerOverrideLoaded = false
     fun editableProject(id: String): SavedProject {
+        if (id == "guitar-tuner") {
+            if (!tunerOverrideLoaded) { tunerOverride = store.read(id); tunerOverrideLoaded = true }
+            tunerOverride?.let { return it }
+        }
+        return storedProject(id)
+    }
+    /** Reads the current stored package from disk (no cache); safe to call off the main thread. */
+    private fun storedProject(id: String): SavedProject {
         store.read(id)?.let { return it }
         check(id == "guitar-tuner" && tunerVisible) { "App is no longer available" }
         originalTuner?.let { return it }
@@ -81,7 +107,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     fun hardwareDefault(cap: String): Rule { hardwareRevision; return readHardwareRule("$cap.default",Rule.ASK) }
     fun hardwareRule(id: String,cap: String): Rule { hardwareRevision; requireProjectId(id);return readHardwareRule("$id.$cap",Rule.INHERIT) }
     private fun readHardwareRule(key: String,fallback: Rule) = runCatching {Rule.valueOf(permissionPrefs.getString(key,fallback.name)!!)}.getOrDefault(fallback)
-    fun changeHardwareBlock(cap: String,value: Boolean) { require(cap in HardwareContract.OPERATIONS);permissionPrefs.edit().putBoolean("$cap.blocked",value).apply();stopHardware();hardwareRevision++;updateContext() }
+    fun changeHardwareBlock(cap: String,value: Boolean) { require(cap in HardwareContract.OPERATIONS);permissionPrefs.edit().putBoolean("$cap.blocked",value).apply();stopHardware();hardwareRevision++ }
     fun changeHardwareDefault(cap: String,value: Rule) { require(cap in HardwareContract.OPERATIONS && value in setOf(Rule.ASK,Rule.ALLOW));permissionPrefs.edit().putString("$cap.default",value.name).apply();stopHardware();hardwareRevision++ }
     fun changeHardwareRule(id: String,cap: String,value: Rule) { requireProjectId(id);require(cap in HardwareContract.OPERATIONS);permissionPrefs.edit().putString("$id.$cap",value.name).apply();stopHardware();hardwareRevision++ }
     fun stopHardware() { hardwareEpoch++;hardware?.close();hardware=null;hardwarePrompt=null;hardwareAndroidRequest=null;devicePicker=null;cameraRequest=null;nfcRequest=null;hardwareRevision++;broker.stop();runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped")) }
@@ -96,7 +122,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                 // script is busy, so concurrent streams all get delivered and none can exhaust the event queue.
                 {packet,disposable->if(hardwareEpoch==epoch) { if(packet["event"]?.asString=="audio.routeLost") broker.stop("Audio route disconnected")
                     runtime?.send(packet,key=if(disposable) "$HARDWARE_STREAM${packet["id"].asString}:${packet["event"].asString}" else null) }},
-                {if(hardware?.isClosed==true) {broker.stop("Hardware access ended");runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped"))};hardwareRevision++;updateContext()}).also {hardware=it}
+                {if(hardware?.isClosed==true) {broker.stop("Hardware access ended");runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped"))};hardwareRevision++}).also {hardware=it}
         }
     }
     var ui by mutableStateOf<JsonObject?>(null)
@@ -125,7 +151,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         private set
     var pitchFrames by mutableStateOf(0L)
         private set
-    var contextJson by mutableStateOf("")
+    var savingPreview by mutableStateOf(false)
         private set
     private var capabilities = emptySet<String>()
     private var projectMicrophoneRules by mutableStateOf<Map<String, Rule>>(emptyMap())
@@ -155,7 +181,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
             }, disposable = true)
         })
 
-    init { runCatching {media.cleanupTemporary()};syncPolicies() }
+    init { runCatching {media.cleanupTemporary()};syncPolicies();refreshProjects() }
     fun openProject(project: SavedProject?) {
         if (project != null) requireProjectId(project.id)
         closeProject()
@@ -201,29 +227,45 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         broker.setForeground(visible)
         syncPolicies(); restart()
     }
-    fun savePreview() {
-        if (!preview || ui == null || failure != null) return
-        runCatching {
-            val target = previewEditTarget
-            if (target != null) {
-                check(editableProject(target.id).bundle.toJson() == target.bundle.toJson()) { "App changed since editing began" }
-                val updated = store.update(target.id, selectedBundle!!)
-                projects = store.list().filter { it.id != "guitar-tuner" }
-                openProject(updated)
-                return@runCatching
-            }
-            val saved = store.save(selectedBundle!!)
-            try {
-                check(context.getSharedPreferences("project.${saved.id}", Context.MODE_PRIVATE).edit().putString("data",previewData.toString()).commit())
-                media.copyPreview(projectId,saved.id)
-            } catch(e: Exception) {
-                runCatching {store.delete(saved.id)}
-                context.deleteSharedPreferences("project.${saved.id}")
-                runCatching {media.delete(saved.id)}
-                throw e
-            }
-            projects = store.list().filter { it.id != "guitar-tuner" }; openProject(saved)
-        }.onFailure { failure = "Could not save project locally" }
+    /**
+     * Saves the open preview. Writing the package, its data and a photo set (up to 1 GiB) runs off the
+     * main thread; the saved app then reopens and [onSaved] receives the preview's history ID and the
+     * saved project. [savingPreview] is true meanwhile, so the preview cannot be saved twice or closed.
+     */
+    fun savePreview(onSaved: (historyId: String?, saved: SavedProject) -> Unit = { _, _ -> }) {
+        if (!preview || ui == null || failure != null || savingPreview) return
+        val bundle = selectedBundle ?: return
+        val target = previewEditTarget; val previewId = projectId; val historyId = previewHistoryId
+        val data = previewData.toString()
+        savingPreview = true
+        viewModelScope.launch {
+            val result = runCatching { withContext(Dispatchers.IO) {
+                val saved = if (target != null) {
+                    check(storedProject(target.id).bundle.toJson() == target.bundle.toJson()) { "App changed since editing began" }
+                    store.update(target.id, bundle)
+                } else {
+                    val created = store.save(bundle)
+                    try {
+                        check(context.getSharedPreferences("project.${created.id}", Context.MODE_PRIVATE).edit().putString("data",data).commit())
+                        media.copyPreview(previewId,created.id)
+                    } catch(e: Exception) {
+                        runCatching {store.delete(created.id)}
+                        context.deleteSharedPreferences("project.${created.id}")
+                        runCatching {media.delete(created.id)}
+                        throw e
+                    }
+                    created
+                }
+                saved to store.list().filter { it.id != "guitar-tuner" }
+            } }
+            savingPreview = false
+            result.onSuccess { (saved, library) ->
+                projectsEpoch++; projects = library // Newer than any library read still in flight.
+                if (saved.id == "guitar-tuner") { tunerOverride = saved; tunerOverrideLoaded = true }
+                if (preview && projectId == previewId) openProject(saved) else syncPolicies()
+                onSaved(historyId, saved)
+            }.onFailure { if (preview && projectId == previewId) failure = "Could not save project locally" }
+        }
     }
     fun deleteProject(project: SavedProject) {
         runCatching {
@@ -234,11 +276,14 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                 tunerVisible = false
             }
             store.delete(project.id)
+            if (project.id == "guitar-tuner") { tunerOverride = null; tunerOverrideLoaded = true }
             media.delete(project.id)
             permissionPrefs.edit().apply { HardwareContract.OPERATIONS.keys.forEach {remove("${project.id}.$it")} }.apply()
             context.deleteSharedPreferences("project.${project.id}")
             context.getSharedPreferences("permissions", Context.MODE_PRIVATE).edit().remove("${project.id}.microphone").apply()
-            projects = store.list().filter { it.id != "guitar-tuner" }
+            // Update the launcher at once; the background reread also covers a library load still in flight.
+            projects = projects.filter { it.id != project.id }
+            refreshProjects()
             syncPolicies()
         }.onFailure { failure = "Could not delete project" }
     }
@@ -294,11 +339,12 @@ class HostModel(application: Application) : AndroidViewModel(application) {
             })
             runtime = client
             client.start(sourceText)
-            updateContext()
         } catch (e: Exception) { failure = e.message; runtimeStatus = "Project could not start" }
     }
     private fun receive(packet: UiPacket) {
-        ui = packet.ui
+        // Scripts often return an identical screen (a tuner while nothing is playing); JsonObject equality
+        // is structural, so skip the state write and the recomposition it would trigger.
+        if (packet.ui != ui) ui = packet.ui
         hardwareIntent = runtime?.responseIsUserAction == true
         for (item in packet.effects) {
             val effect = item.asJsonObject
@@ -342,7 +388,6 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         val requestedProject = pendingAndroidProjectId
         pendingAndroidProjectId = null
         if (projectOpen && visible && requestedProject == projectId) broker.androidResult(granted)
-        updateContext()
     }
     fun blockGlobally(value: Boolean) { broker.globalBlocked = value; syncPolicies() }
     fun changeGlobalDefault(value: Rule) { broker.globalDefault = value; syncPolicies() }
@@ -364,7 +409,6 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         require(value in setOf("moss", "blue", "violet"))
         accent = value
         prefs.edit().putString("accent", value).apply()
-        updateContext()
     }
     private fun syncPolicies() {
         globalBlocked = broker.globalBlocked; globalDefault = broker.globalDefault
@@ -372,9 +416,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         projectMicrophoneRules = (listOf("guitar-tuner") + projects.map { it.id }).associateWith { id ->
             runCatching { Rule.valueOf(permissionPrefs.getString("$id.microphone", Rule.INHERIT.name)!!) }.getOrDefault(Rule.INHERIT)
         }
-        updateContext()
     }
-    private fun updateContext() { contextJson = com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(deviceContext()) }
     private var builderViewportWidthPx=0
     private var builderViewportHeightPx=0
     fun updateBuilderViewport(width:Int,height:Int) {

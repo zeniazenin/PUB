@@ -40,7 +40,7 @@ public class AppSpecTest {
         AppSpec spec = sample();
         String json = spec.toJson();
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-        assertEquals(Set.of("version", "request", "brief", "tests", "updatedAtMillis"), root.keySet());
+        assertEquals(Set.of("version", "request", "brief", "tests", "uiPlan", "updatedAtMillis"), root.keySet());
         assertEquals(AppSpec.VERSION, root.get("version").getAsInt());
         AppSpec parsed = AppSpec.parse(json);
         assertEquals(json, parsed.toJson());
@@ -129,13 +129,36 @@ public class AppSpecTest {
         assertEquals(Long.MAX_VALUE, AppSpec.parse(json).updatedAtMillis);
     }
 
+    private static UiPlan plan() {
+        return UiPlan.parseModelOutput("{\"layout\":\"One screen\",\"screens\":[{\"name\":\"Tip\",\"purpose\":\"Split a bill\","
+                + "\"firstView\":\"Bill, tip, people, total\",\"elements\":[\"input decimal: Bill\"],\"states\":[]}],"
+                + "\"interactions\":[],\"content\":[],\"accessibility\":[]}");
+    }
+
+    @Test public void storesTheUiPlanAndStillReadsVersionOneSpecs() {
+        AppSpec spec = AppSpec.of(REQUEST, brief(), tests(), plan(), 1_731_600_000_000L);
+        AppSpec parsed = AppSpec.parse(spec.toJson());
+        assertEquals(plan().toJson(), parsed.uiPlan.toJson());
+        assertEquals(spec.toJson(), parsed.toJson());
+        assertEquals(plan().toJson(), sample().withBuild(brief(), tests(), plan(), 2).uiPlan.toJson());
+        assertNull("A build without a plan replaces the stored one", spec.withBuild(brief(), tests(), 2).uiPlan);
+        // A spec written before UI plans: version 1 without the uiPlan field.
+        JsonObject legacy = JsonParser.parseString(sample().toJson()).getAsJsonObject();
+        legacy.addProperty("version", 1);
+        legacy.remove("uiPlan");
+        AppSpec old = AppSpec.parse(legacy.toString());
+        assertNull(old.uiPlan);
+        assertEquals(REQUEST, old.request);
+        assertEquals(2, old.testCount());
+    }
+
     @Test public void unknownMissingAndDuplicateFieldsAreRejected() {
         rejected(o -> o.addProperty("photos", "x"));
         rejected(o -> o.addProperty("data", "{}"));
-        for (String field : new String[]{"version", "request", "brief", "tests", "updatedAtMillis"}) rejected(o -> o.remove(field));
+        for (String field : new String[]{"version", "request", "brief", "tests", "uiPlan", "updatedAtMillis"}) rejected(o -> o.remove(field));
         String json = sample().toJson();
-        assertTrue(json.startsWith("{\"version\":1,"));
-        assertThrows(IllegalArgumentException.class, () -> AppSpec.parse(json.replaceFirst("\\{\"version\":1,", "{\"version\":1,\"version\":1,")));
+        assertTrue(json.startsWith("{\"version\":2,"));
+        assertThrows(IllegalArgumentException.class, () -> AppSpec.parse(json.replaceFirst("\\{\"version\":2,", "{\"version\":2,\"version\":2,")));
         // A duplicate inside the nested brief or suite cannot overwrite the first value either.
         String briefStart = "\"brief\":{\"summary\":";
         assertTrue(json.contains(briefStart));
@@ -146,7 +169,11 @@ public class AppSpecTest {
     }
 
     @Test public void wrongVersionsTypesAndNestedDataAreRejected() {
-        rejected(o -> o.addProperty("version", 2));
+        rejected(o -> o.addProperty("version", 3));
+        // Version 1 specs predate UI plans: they never have the field.
+        rejected(o -> o.addProperty("version", 1));
+        rejected(o -> o.addProperty("uiPlan", "{}"));
+        rejected(o -> o.add("uiPlan", JsonParser.parseString("{\"layout\":\"x\"}")));
         rejected(o -> o.addProperty("version", 0));
         rejected(o -> o.addProperty("version", "1"));
         rejected(o -> o.add("version", JsonParser.parseString("1.0")));
@@ -171,7 +198,7 @@ public class AppSpecTest {
     @Test public void malformedOversizeAndTrailingContentAreRejectedWithoutEchoingIt() {
         String json = sample().toJson();
         List<String> invalid = List.of("", "null", "[]", "{", json + " {}", json + "x", "{\"version\":1}",
-                json.replaceFirst("\"version\":1", "version:1"), "{".repeat(30) + "}".repeat(30),
+                json.replaceFirst("\"version\":2", "version:2"), "{".repeat(30) + "}".repeat(30),
                 " ".repeat(AppSpec.MAX_JSON_CHARS + 1));
         for (String text : invalid) assertThrows(IllegalArgumentException.class, () -> AppSpec.parse(text));
         assertThrows(IllegalArgumentException.class, () -> AppSpec.parse(null));

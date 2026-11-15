@@ -22,4 +22,21 @@ public class UiPacketTest {
         for(int i=0;i<12;i++) node="{\"type\":\"column\",\"children\":["+node+"]}";
         UiPacket.parse("{\"ui\":"+node+"}");
     }
+    private static String input(String fields) { return "{\"ui\":{\"type\":\"input\",\"label\":\"Note\",\"action\":\"note\"," + fields + "}}"; }
+    private static String text(String style, int length) { return "{\"ui\":{\"type\":\"text\",\"style\":\"" + style + "\",\"text\":\"" + "x".repeat(length) + "\"}}"; }
+    @Test public void multilineInputsHoldLongerTextWithKeyboardAndVoiceOptions() {
+        UiPacket.parse(input("\"value\":\"" + "x".repeat(UiPacket.MAX_MULTILINE_VALUE) + "\",\"multiline\":true,\"voice\":true"));
+        UiPacket.parse(input("\"value\":\"12.5\",\"keyboard\":\"decimal\""));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> UiPacket.parse(input("\"value\":\"" + "x".repeat(UiPacket.MAX_INPUT_VALUE + 1) + "\"")));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> UiPacket.parse(input("\"value\":\"" + "x".repeat(UiPacket.MAX_INPUT_VALUE + 1) + "\",\"multiline\":false")));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> UiPacket.parse(input("\"value\":\"\",\"multiline\":\"yes\"")));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> UiPacket.parse(input("\"value\":\"\",\"voice\":1")));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> UiPacket.parse(input("\"value\":\"\",\"keyboard\":\"emoji\"")));
+    }
+    @Test public void onlyParagraphTextHoldsLongReadingText() {
+        UiPacket.parse(text("paragraph", UiPacket.MAX_PARAGRAPH));
+        UiPacket.parse(text("body", UiPacket.MAX_TEXT));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> UiPacket.parse(text("body", UiPacket.MAX_TEXT + 1)));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> UiPacket.parse(text("paragraph", UiPacket.MAX_PARAGRAPH + 1)));
+    }
 }

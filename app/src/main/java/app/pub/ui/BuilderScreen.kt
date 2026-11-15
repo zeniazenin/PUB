@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -131,6 +133,8 @@ fun BuilderScreen(
 
     builder.researchBrief?.let { ResearchCard(it) }
     builder.researchNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    builder.uiPlan?.let { UiPlanCard(it) }
+    builder.uiPlanNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
     builder.visualReview?.let {
         Card { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -143,7 +147,10 @@ fun BuilderScreen(
     builder.draft?.let { draft ->
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(draft.name, style = MaterialTheme.typography.titleLarge)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    AppIconTile(draft.name, draft.icon?.let { draft.assets[it]?.asJsonObject }, size = 64.dp)
+                    Text(draft.name, style = MaterialTheme.typography.titleLarge)
+                }
                 Text(draft.description)
                 if (!draft.assets.isEmpty) Text("Graphics: ${draft.assets.size()} local assets")
                 Text("Requested access: " + draft.capabilities.joinToString().ifBlank { "none" })
@@ -222,6 +229,33 @@ internal fun ResearchCard(brief: ResearchBrief) {
             if (longest > RESEARCH_PREVIEW_ITEMS) {
                 TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Show less" else "Show all") }
             }
+        }
+    }
+}
+
+/** The build's UI plan: its structure and each screen's purpose; every element and state on request. */
+@Composable
+internal fun UiPlanCard(plan: app.pub.core.UiPlan) {
+    var expanded by rememberSaveable(plan.layout) { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth().testTag("ui-plan-card")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("UI plan", style = MaterialTheme.typography.titleMedium)
+            Text(plan.layout)
+            plan.screens.forEach { screen ->
+                Text(screen.name, style = MaterialTheme.typography.titleSmall)
+                Text(screen.purpose, style = MaterialTheme.typography.bodyMedium)
+                if (expanded) {
+                    Text("First view: ${screen.firstView}", style = MaterialTheme.typography.bodySmall)
+                    screen.elements.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    screen.states.forEach { Text("◦ $it", style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+            if (expanded) {
+                ResearchList("Interactions", plan.interactions, Int.MAX_VALUE)
+                ResearchList("Wording and formats", plan.content, Int.MAX_VALUE)
+                ResearchList("Accessibility", plan.accessibility, Int.MAX_VALUE)
+            }
+            TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Show less" else "Show every screen in detail") }
         }
     }
 }

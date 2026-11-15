@@ -8,7 +8,7 @@ Each new-app session has its own history. Saving links all its attempts, includi
 
 ## Automatic screenshot review
 
-After a successful generation, PUB runs the draft in its isolated JavaScript runtime with empty storage and settings. All effects are ignored, no hardware access is provided, and saved photos are not loaded. It renders the initial viewport using the native renderer and current theme, waits for graphical assets, and captures only the generated surface.
+After a successful generation, PUB runs the draft in its isolated JavaScript runtime with empty storage and settings. File requests are answered from an empty in-memory folder (`SimulatedFiles`), so an app that loads its files is captured in its empty state rather than while loading; all other effects are ignored, no hardware access is provided, and saved photos are not loaded. It renders the initial viewport using the native renderer and current theme, waits for graphical assets, and captures only the generated surface.
 
 The screenshot is bounded to 1280 pixels on its longest side and 4 MiB. PUB sends it, the submitted request and generated app code to the selected model through the existing ChatGPT connection (now also the build's research brief and a behavior-check summary as data; see docs/research.md and docs/behavior-checks.md). Screenshot bytes are temporary, not saved to the user's photo library. Review findings are stored with the exact prompt.
 

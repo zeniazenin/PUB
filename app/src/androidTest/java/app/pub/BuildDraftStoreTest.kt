@@ -13,6 +13,7 @@ import app.pub.core.AppTestSuite
 import app.pub.core.ChecksReport
 import app.pub.core.ProjectBundle
 import app.pub.core.ResearchBrief
+import app.pub.core.UiPlan
 import app.pub.projects.SavedProject
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -65,6 +66,9 @@ class BuildDraftStoreTest {
         {"name":"Minutes input","steps":[{"type":"input","action":"minutes","value":"5"}],"expect":["5:00"]}]""")
     private fun checks() = ChecksReport.of(listOf(ChecksReport.Entry.passed("Start shows running · café 🎸"),
         ChecksReport.Entry.failed("Minutes input", "Missing: \"5:00\". Visible: Timer | Minutes: 5")))
+    private fun plan() = UiPlan.parseModelOutput("""{"layout":"One timer screen · café 🎸","screens":[{"name":"Timer","purpose":"Time a practice session",
+        "firstView":"Elapsed time, Start/Stop","elements":["text display: elapsed time","button: 'Start'"],"states":["running: 'Running'"]}],
+        "interactions":["Stop keeps the elapsed time"],"content":[],"accessibility":["Buttons have text labels"]}""")
     private fun snapshot() = BuildDraftSnapshot(
         prompt = "Make the timer calmer.\nKeep café 🎸 text.", sessionId = UUID.randomUUID().toString(),
         editingProject = SavedProject(UUID.randomUUID().toString(), bundle("Original", true)),
@@ -72,7 +76,7 @@ class BuildDraftStoreTest {
         draftRequest = "Make the timer calmer.", draftModel = "astra-test", repairPass = 1,
         message = "Review ready", visualReview = "The labels are readable.", visualReviewError = null, running = false,
         research = research(), tests = tests(), checks = checks(),
-        originalRequest = "A practice timer with start and stop.\nKeep café 🎸 text."
+        originalRequest = "A practice timer with start and stop.\nKeep café 🎸 text.", uiPlan = plan()
     )
     private fun assertSameContent(expected: BuildDraftSnapshot, actual: BuildDraftSnapshot) {
         assertEquals(expected.prompt, actual.prompt); assertEquals(expected.sessionId, actual.sessionId)
@@ -86,6 +90,7 @@ class BuildDraftStoreTest {
         assertEquals(expected.research?.toJson(), actual.research?.toJson())
         assertEquals(expected.tests?.toJson(), actual.tests?.toJson()); assertEquals(expected.checks?.toJson(), actual.checks?.toJson())
         assertEquals(expected.originalRequest, actual.originalRequest)
+        assertEquals(expected.uiPlan?.toJson(), actual.uiPlan?.toJson())
     }
 
     @Test fun editingBaselineDraftAndGeneratedAssetsSurviveReload() {
@@ -93,7 +98,7 @@ class BuildDraftStoreTest {
         val expected = snapshot(); store.write(expected)
         assertSameContent(expected, BuildDraftStore(context).read()!!)
         val root = JsonParser.parseString(file.readText()).asJsonObject
-        assertEquals(setOf("version", "prompt", "sessionId", "editingProject", "draft", "draftHistoryId", "draftRequest", "draftModel", "repairPass", "message", "visualReview", "visualReviewError", "running", "research", "tests", "checks", "originalRequest"), root.keySet())
+        assertEquals(setOf("version", "prompt", "sessionId", "editingProject", "draft", "draftHistoryId", "draftRequest", "draftModel", "repairPass", "message", "visualReview", "visualReviewError", "running", "research", "tests", "checks", "originalRequest", "uiPlan"), root.keySet())
         assertEquals(BuildDraftStore.VERSION, root["version"].asInt)
         assertEquals(setOf("id", "bundle"), root.getAsJsonObject("editingProject").keySet())
     }
@@ -101,16 +106,17 @@ class BuildDraftStoreTest {
     @Test fun researchBriefRoundTripsAndVersionOneSnapshotsStillLoad() {
         val store = BuildDraftStore(context); val expected = snapshot(); store.write(expected)
         val restored = BuildDraftStore(context).read()!!.research!!
-        assertTrue(restored.web); assertEquals("https://example.com/timers?utm_source=openai", restored.sources.single().url)
+        // The fixture's OpenAI tracking tag is removed when the source is created.
+        assertTrue(restored.web); assertEquals("https://example.com/timers", restored.sources.single().url)
         assertFalse(restored.features[1].feasibleInPub)
         val withoutResearch = expected.copy(research = null); store.write(withoutResearch)
         assertNull(BuildDraftStore(context).read()!!.research)
         assertTrue(JsonParser.parseString(file.readText()).asJsonObject["research"].isJsonNull)
         // A file written before research existed: version 1 and no research, tests, checks or original request fields.
-        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("research"); remove("tests"); remove("checks"); remove("originalRequest"); addProperty("version", 1) }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("research"); remove("tests"); remove("checks"); remove("originalRequest"); remove("uiPlan"); addProperty("version", 1) }
         file.writeText(legacy.toString())
         val loaded = BuildDraftStore(context).read()!!
-        assertSameContent(withoutResearch.copy(tests = null, checks = null, originalRequest = null), loaded)
+        assertSameContent(withoutResearch.copy(tests = null, checks = null, originalRequest = null, uiPlan = null), loaded)
         store.write(expected) // A version 1 file can be replaced by the current version.
         assertSameContent(expected, store.read()!!)
     }
@@ -128,9 +134,9 @@ class BuildDraftStoreTest {
         val noSuite = expected.copy(tests = null, checks = null); store.write(noSuite)
         assertSameContent(noSuite, BuildDraftStore(context).read()!!)
         // A file written before behavior checks existed: version 2, research but no tests, checks or original request.
-        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("tests"); remove("checks"); remove("originalRequest"); addProperty("version", 2) }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("tests"); remove("checks"); remove("originalRequest"); remove("uiPlan"); addProperty("version", 2) }
         file.writeText(legacy.toString())
-        assertSameContent(noSuite.copy(originalRequest = null), BuildDraftStore(context).read()!!)
+        assertSameContent(noSuite.copy(originalRequest = null, uiPlan = null), BuildDraftStore(context).read()!!)
         store.write(expected) // A version 2 file can be replaced by the current version.
         assertSameContent(expected, store.read()!!)
     }
@@ -183,10 +189,16 @@ class BuildDraftStoreTest {
         assertTrue(JsonParser.parseString(file.readText()).asJsonObject["originalRequest"].isJsonNull)
         // A file written before the original request was kept: version 3 with research, tests and checks.
         store.write(expected)
-        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("originalRequest"); addProperty("version", 3) }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("originalRequest"); remove("uiPlan"); addProperty("version", 3) }
         file.writeText(legacy.toString())
-        assertSameContent(withoutOriginal, BuildDraftStore(context).read()!!)
+        assertSameContent(withoutOriginal.copy(uiPlan = null), BuildDraftStore(context).read()!!)
         store.write(expected) // A version 3 file can be replaced by the current version.
+        assertSameContent(expected, store.read()!!)
+        // A file written before UI plans: version 4 with the original request but no plan.
+        val versionFour = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("uiPlan"); addProperty("version", 4) }
+        file.writeText(versionFour.toString())
+        assertSameContent(expected.copy(uiPlan = null), BuildDraftStore(context).read()!!)
+        store.write(expected)
         assertSameContent(expected, store.read()!!)
         // Bounds, type and version field sets are enforced like every other field.
         val valid = JsonParser.parseString(file.readText()).asJsonObject
@@ -194,7 +206,10 @@ class BuildDraftStoreTest {
             valid.deepCopy().apply { addProperty("originalRequest", "   ") },
             valid.deepCopy().apply { addProperty("originalRequest", 5) },
             valid.deepCopy().apply { remove("originalRequest") },
-            valid.deepCopy().apply { addProperty("version", 3) }).forEach { root ->
+            valid.deepCopy().apply { addProperty("version", 3) },
+            valid.deepCopy().apply { addProperty("version", 4) },
+            valid.deepCopy().apply { addProperty("uiPlan", "{}") },
+            valid.deepCopy().apply { getAsJsonObject("uiPlan").addProperty("code", "x") }).forEach { root ->
             val bytes = root.toString().toByteArray()
             file.writeBytes(bytes)
             assertThrows(BuildDraftStoreException::class.java) { store.read() }

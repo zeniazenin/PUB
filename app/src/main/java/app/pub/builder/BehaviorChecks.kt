@@ -5,6 +5,7 @@ import android.os.SystemClock
 import app.pub.core.AppTestSuite
 import app.pub.core.ChecksReport
 import app.pub.core.ProjectBundle
+import app.pub.core.UiPacket
 import app.pub.runtime.RuntimeClient
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
@@ -16,9 +17,11 @@ import kotlin.math.min
 /**
  * Runs an app's behavior checks in PUB's isolated runtime, one fresh session per test, on the main thread.
  * Like the visual preview, a session starts from init with the preview device context, empty settings and empty
- * storage, and has no broker, permissions, hardware, saved data or photos: every effect is discarded. UI packets
- * are validated by RuntimeClient exactly as for a running app. A runtime failure or timeout fails only that test.
- * Every client is closed, including on cancellation, which propagates to the caller.
+ * storage, and has no broker, permissions, hardware, saved data or photos. File requests are answered from the test's
+ * own in-memory folder (AppTestSuite.Run's SimulatedFiles, which starts empty and never touches the phone's storage);
+ * every other effect is discarded. UI packets are validated by RuntimeClient exactly as for a running app. A runtime
+ * failure or timeout fails only that test. Every client is closed, including on cancellation, which propagates to the
+ * caller.
  */
 object BehaviorChecks {
     const val TEST_TIMEOUT_MS = 10_000L
@@ -37,23 +40,23 @@ object BehaviorChecks {
 
     private sealed interface Update {
         data object Ready : Update
-        class Packet(val ui: JsonObject) : Update
+        class Packet(val packet: UiPacket) : Update
         class Failed(val message: String) : Update
     }
 
     private suspend fun runTest(context: Context, source: String, test: AppTestSuite.TestCase, device: JsonObject, timeoutMs: Long): ChecksReport.Entry {
         val run = AppTestSuite.Run(test)
         val updates = Channel<Update>(Channel.UNLIMITED)
-        // Callbacks arrive on the main thread; effects are deliberately ignored.
+        // Callbacks arrive on the main thread. The run answers file requests from its simulated folder; other effects are ignored.
         val client = RuntimeClient(context, onReady = { updates.trySend(Update.Ready) },
-            onPacket = { updates.trySend(Update.Packet(it.ui)) }, onError = { updates.trySend(Update.Failed(it)) })
+            onPacket = { updates.trySend(Update.Packet(it)) }, onError = { updates.trySend(Update.Failed(it)) })
         try {
             val finished = withTimeoutOrNull(timeoutMs) {
                 runCatching { client.start(source) }.onFailure { run.fail("The isolated runtime could not start.") }
                 while (!run.isFinished) {
                     when (val update = updates.receive()) {
                         Update.Ready -> client.send(AppTestSuite.Run.initEvent(device))
-                        is Update.Packet -> run.next(update.ui)?.let { client.send(it) }
+                        is Update.Packet -> run.next(update.packet)?.let { client.send(it) }
                         is Update.Failed -> run.fail(update.message)
                     }
                 }

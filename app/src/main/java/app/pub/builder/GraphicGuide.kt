@@ -5,11 +5,11 @@ object GraphicGuide {
         GRAPHICAL ASSETS: You can create real scalable illustrations/icons/schematics as vector geometry,
         or request generated PNG illustrations. Do not replace requested graphics with ASCII, emoji diagrams,
         placeholder text, or a claim that PUB cannot draw. Use the following native assets.
-        Optional package fields: assets:{assetId:definition,...}, icon:'assetId'. Max8 assets, max2 generated images.
+        Optional package field: assets:{assetId:definition,...}. Max8 assets (keep one free for the launcher icon), max2 generated images.
+        Launcher icon: PUB designs it in a separate step, so do not draw one or add an icon field to a new app. When revising an app, return its icon field and that asset exactly as they are.
         Asset/shape IDs use 1..40 ASCII letters,digits,_,-. Store assets in the package, never in JavaScript/storage.save.
         Use {type:'graphic',asset:'guitar',description:'Guitar strings',highlight:['string-0']} in the UI.
         Each dispatch can change highlight IDs; the host accents matching vector shapes. Max4 image/graphic nodes total.
-        An asset designated by icon is used for the launcher icon. Design with clear margins and simple shapes.
         Vector definition: {type:'vector',width:320,height:400,shapes:[...]}. Width/height>0..1024; max128 shapes.
         Every shape has unique id,type; optional fill/stroke ('#RRGGBB','#AARRGGBB',primary,surface,onSurface,outline,transparent),
         strokeWidth0..20. Coordinates must be finite in -1024..2048. Give explicit fill/stroke for predictable results.

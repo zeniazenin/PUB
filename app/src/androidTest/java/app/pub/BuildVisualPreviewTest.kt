@@ -134,6 +134,21 @@ class BuildVisualPreviewTest {
         } finally { preferences.edit().clear().commit() }
     }
 
+    @Test fun fileRequestsAreAnsweredFromAnEmptySimulatedFolderBeforeCapture() {
+        val storage = File(compose.activity.filesDir, "app-files")
+        val before = storage.list()?.sorted()
+        // Init writes and lists; the capture must show the screen after both replies, and nothing reaches real storage.
+        val source = """var status='Loading files';var count=0;function dispatch(raw){count++;var e=JSON.parse(raw),fx=[];
+            if(e.type==='init'){fx=[{type:'files.request',id:'w',operation:'write',args:{path:'probe.txt',data:'x',encoding:'utf8'}},
+                {type:'files.request',id:'l',operation:'list',args:{}}];}
+            else if(e.type==='files'&&e.operation==='list'){status='Files: '+e.entries.map(function(x){return x.path;}).join(',');}
+            return JSON.stringify({ui:{type:'column',children:[{type:'text',text:status},{type:'text',text:'Dispatch count '+count}]},effects:fx});}"""
+        awaitCapture(show(bundle(source)))
+        compose.onNodeWithText("Files: photos,probe.txt").assertIsDisplayed()
+        compose.onNodeWithText("Dispatch count 3").assertIsDisplayed()
+        assertEquals(before, File(compose.activity.filesDir, "app-files").list()?.sorted())
+    }
+
     @Test fun rasterIsDecodedBeforeCaptureAndMissingRasterFailsOnce() {
         // Image preserves its intrinsic pixel size; use enough pixels to survive viewport downsampling.
         val red = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(230, 20, 40)) }

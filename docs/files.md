@@ -88,7 +88,7 @@ Per app: 256 MiB and 5,000 files and folders, separate from the photo quota (20 
 - **Deleting an app** deletes its folder, after any request still running for it.
 - The Tip Calculator sample is an ordinary saved app (no files until it uses them). Legacy `guitar-tuner` apps have a folder like any other.
 
-Behavior checks and the visual review never perform `files.request` and deliver no `files` events; the generation contract tells apps to render a sensible screen before any reply.
+Behavior checks and the visual review never touch real files. They answer `files.request` from `SimulatedFiles`, an in-memory folder that starts empty and behaves like this one (see `docs/behavior-checks.md`), and phone-file requests as if nothing were picked (pickers answer `cancelled`). The visual review captures the screen after the replies to init's requests, so it shows the app's empty state. The generation contract still tells apps to render a complete screen before any reply.
 
 ## Host API
 

@@ -17,18 +17,18 @@ import java.util.Set;
 
 /**
  * What PUB keeps about one saved app so that later edits build on it instead of starting over: the request the app
- * was first built from, and the research brief and behavior checks of its latest saved build. It never contains
- * the app's package, saved data, photos, device context or credentials. The stored form is strict: exactly the
- * five fields below, bounded values, and the nested brief and suite revalidated by their own parsers. Invalid data
- * is rejected as a whole and errors never echo it.
+ * was first built from, and the research brief, behavior checks and UI plan of its latest saved build. It never
+ * contains the app's package, saved data, photos, device context or credentials. The stored form is strict: exactly
+ * the fields below (version 1, written before UI plans, has no uiPlan), bounded values, and the nested brief, suite
+ * and plan revalidated by their own parsers. Invalid data is rejected as a whole and errors never echo it.
  *
- * <pre>{"version":1,"request":"…","brief":{…}|null,"tests":[…]|null,"updatedAtMillis":1731600000000}</pre>
+ * <pre>{"version":2,"request":"…","brief":{…}|null,"tests":[…]|null,"uiPlan":{…}|null,"updatedAtMillis":1731600000000}</pre>
  */
 public final class AppSpec {
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     public static final int MAX_REQUEST = 8000;
     /** Every field at its maximum, with JSON escaping (at most six characters per request character), stays below this. */
-    public static final int MAX_JSON_CHARS = 6 * MAX_REQUEST + ResearchBrief.MAX_STORED_JSON_CHARS + AppTestSuite.MAX_JSON_CHARS + 1_000;
+    public static final int MAX_JSON_CHARS = 6 * MAX_REQUEST + ResearchBrief.MAX_STORED_JSON_CHARS + AppTestSuite.MAX_JSON_CHARS + UiPlan.MAX_JSON_CHARS + 1_000;
 
     /** The request the app was first built from (for an app saved before specs existed, its first saved edit's). */
     public final String request;
@@ -36,23 +36,33 @@ public final class AppSpec {
     public final ResearchBrief brief;
     /** The latest saved build's behavior checks; null when none were requested, empty when none were usable. */
     public final AppTestSuite tests;
+    /** The latest saved build's UI plan; null when that build had none (an older build, or planning failed). */
+    public final UiPlan uiPlan;
     public final long updatedAtMillis;
 
-    private AppSpec(String request, ResearchBrief brief, AppTestSuite tests, long updatedAtMillis) {
-        this.request = request; this.brief = brief; this.tests = tests; this.updatedAtMillis = updatedAtMillis;
+    private AppSpec(String request, ResearchBrief brief, AppTestSuite tests, UiPlan uiPlan, long updatedAtMillis) {
+        this.request = request; this.brief = brief; this.tests = tests; this.uiPlan = uiPlan; this.updatedAtMillis = updatedAtMillis;
     }
 
     /** request must have 1 to 8000 characters and not be blank; updatedAtMillis must be positive. */
-    public static AppSpec of(String request, ResearchBrief brief, AppTestSuite tests, long updatedAtMillis) {
+    public static AppSpec of(String request, ResearchBrief brief, AppTestSuite tests, UiPlan uiPlan, long updatedAtMillis) {
         if (request == null || request.isBlank() || request.length() > MAX_REQUEST || updatedAtMillis <= 0) {
             throw new IllegalArgumentException("Invalid app spec.");
         }
-        return new AppSpec(request, brief, tests, updatedAtMillis);
+        return new AppSpec(request, brief, tests, uiPlan, updatedAtMillis);
+    }
+    /** A spec without a UI plan. */
+    public static AppSpec of(String request, ResearchBrief brief, AppTestSuite tests, long updatedAtMillis) {
+        return of(request, brief, tests, null, updatedAtMillis);
     }
 
-    /** The spec after another saved build of the same app: the original request stays, brief and checks are replaced. */
+    /** The spec after another saved build of the same app: the original request stays; brief, checks and plan are replaced. */
+    public AppSpec withBuild(ResearchBrief brief, AppTestSuite tests, UiPlan uiPlan, long updatedAtMillis) {
+        return of(request, brief, tests, uiPlan, updatedAtMillis);
+    }
+    /** Like {@link #withBuild(ResearchBrief, AppTestSuite, UiPlan, long)} for a build without a UI plan. */
     public AppSpec withBuild(ResearchBrief brief, AppTestSuite tests, long updatedAtMillis) {
-        return of(request, brief, tests, updatedAtMillis);
+        return of(request, brief, tests, null, updatedAtMillis);
     }
 
     /** The number of stored behavior checks (0 without a suite). */
@@ -65,11 +75,13 @@ public final class AppSpec {
         o.addProperty("request", request);
         o.add("brief", brief == null ? JsonNull.INSTANCE : JsonParser.parseString(brief.toJson()));
         o.add("tests", tests == null ? JsonNull.INSTANCE : JsonParser.parseString(tests.toJson()));
+        o.add("uiPlan", uiPlan == null ? JsonNull.INSTANCE : JsonParser.parseString(uiPlan.toJson()));
         o.addProperty("updatedAtMillis", updatedAtMillis);
         return o.toString();
     }
 
-    private static final Set<String> FIELDS = Set.of("version", "request", "brief", "tests", "updatedAtMillis");
+    private static final Set<String> FIELDS_V1 = Set.of("version", "request", "brief", "tests", "updatedAtMillis");
+    private static final Set<String> FIELDS = Set.of("version", "request", "brief", "tests", "uiPlan", "updatedAtMillis");
 
     /** Parses the stored form written by {@link #toJson()}; anything else is rejected. */
     public static AppSpec parse(String json) {
@@ -84,13 +96,18 @@ public final class AppSpec {
             String request = null;
             ResearchBrief brief = null;
             AppTestSuite tests = null;
+            UiPlan uiPlan = null;
+            int version = 0;
             long updated = 0;
             while (reader.hasNext()) {
                 String field = reader.nextName();
                 if (!fields.add(field)) throw invalid();
                 switch (field) {
                     case "version":
-                        if (!String.valueOf(VERSION).equals(number(reader))) throw invalid();
+                        String number = number(reader);
+                        if (number.equals("1")) version = 1;
+                        else if (number.equals(String.valueOf(VERSION))) version = VERSION;
+                        else throw invalid();
                         break;
                     case "request":
                         if (reader.peek() != JsonToken.STRING) throw invalid();
@@ -106,6 +123,11 @@ public final class AppSpec {
                         if (reader.peek() != JsonToken.BEGIN_ARRAY) throw invalid();
                         tests = AppTestSuite.parse(tree(reader).toString());
                         break;
+                    case "uiPlan":
+                        if (reader.peek() == JsonToken.NULL) { reader.nextNull(); break; }
+                        if (reader.peek() != JsonToken.BEGIN_OBJECT) throw invalid();
+                        uiPlan = UiPlan.parse(tree(reader).toString());
+                        break;
                     case "updatedAtMillis":
                         String raw = number(reader);
                         if (!raw.matches("[1-9][0-9]{0,18}")) throw invalid();
@@ -115,8 +137,8 @@ public final class AppSpec {
                 }
             }
             reader.endObject();
-            if (reader.peek() != JsonToken.END_DOCUMENT || !fields.equals(FIELDS)) throw invalid();
-            return of(request, brief, tests, updated);
+            if (reader.peek() != JsonToken.END_DOCUMENT || !fields.equals(version == 1 ? FIELDS_V1 : FIELDS)) throw invalid();
+            return of(request, brief, tests, uiPlan, updated);
         } catch (IOException | RuntimeException error) {
             // Do not include stored content or exception causes in UI/logs.
             throw invalid();

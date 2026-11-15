@@ -19,8 +19,9 @@ import java.util.regex.Pattern;
 /**
  * Behavior checks the builder model writes next to a generated package (its top-level "tests" field). PUB runs
  * them itself, each in a fresh sandbox: init with the preview device context, empty settings, empty storage and
- * no hardware, then the steps as action/input events with every effect ignored, then substring expectations
- * over the visible UI text. The model's suite is untrusted data parsed against a fixed, bounded schema; an
+ * no hardware, then the steps as action/input events, then substring expectations over the visible UI text. File
+ * requests are answered from {@link SimulatedFiles} (an empty private folder, nothing picked on the phone); every
+ * other effect is ignored. The model's suite is untrusted data parsed against a fixed, bounded schema; an
  * invalid suite is rejected as a whole and errors never echo it.
  */
 public final class AppTestSuite {
@@ -34,8 +35,10 @@ public final class AppTestSuite {
     public static final int MAX_EXPECTATION = 120;
     /** Every field at its maximum, with JSON escaping, stays below this. */
     public static final int MAX_JSON_CHARS = 2_500_000;
-    /** Marks a selected choices option in the visible text. */
+    /** Marks a selected choices option or list item in the visible text. */
     public static final String SELECTED = "[selected] ";
+    /** Marks a checked list item in the visible text; an unchecked one reads "[unchecked] ". */
+    public static final String CHECKED = "[checked] ", UNCHECKED = "[unchecked] ";
     public static final AppTestSuite EMPTY = new AppTestSuite(List.of());
 
     public final List<TestCase> tests;
@@ -71,12 +74,17 @@ public final class AppTestSuite {
             JsonObject node = element.getAsJsonObject();
             String nodeType = text(node, "type");
             switch (nodeType) {
+                case "card":
+                    if ("action".equals(type) && action.equals(text(node, "action"))) return true;
+                    // fall through: a card's contents are on screen too
                 case "column":
+                case "row":
                     JsonElement children = node.get("children");
                     if (children != null && children.isJsonArray()) {
                         for (JsonElement child : children.getAsJsonArray()) if (find(child, depth + 1)) return true;
                     }
                     return false;
+                case "item": return "action".equals(type) && action.equals(text(node, "action"));
                 case "input": return "input".equals(type) && action.equals(text(node, "action"));
                 case "button": return "action".equals(type) && action.equals(text(node, "action"));
                 case "choices":
@@ -152,11 +160,12 @@ public final class AppTestSuite {
 
     /**
      * Drives one test over any runtime transport, one event at a time. Send {@link #initEvent}, pass each
-     * validated UI tree that answers an event to {@link #next} and send what it returns, until it returns null;
-     * then read {@link #entry}. A runtime failure or timeout ends the run through {@link #fail}.
+     * validated packet that answers an event to {@link #next(UiPacket)} and send what it returns, until it returns
+     * null; then read {@link #entry}. A runtime failure or timeout ends the run through {@link #fail}.
      */
     public static final class Run {
         private final TestCase test;
+        private final SimulatedFiles files = new SimulatedFiles();
         private int sent;
         private boolean initialized;
         private List<String> lastVisible = List.of();
@@ -175,8 +184,28 @@ public final class AppTestSuite {
         }
 
         /**
-         * Records the UI that answered the last event. Returns the next step's event, or null once the run is
-         * finished: after the last step's UI was evaluated, or when the next step's control is not on screen.
+         * Handles the packet that answered the last event. Its file requests are answered from the run's
+         * {@link SimulatedFiles} first: while a reply waits, it is returned and the step waits for the packet that
+         * answers it. Then works like {@link #next(JsonObject)} on the settled screen.
+         */
+        public JsonObject next(UiPacket packet) {
+            if (entry != null) throw new IllegalStateException("The check has already finished");
+            files.accept(packet.effects);
+            JsonObject reply = files.next();
+            if (reply != null) {
+                initialized = true;
+                lastVisible = visibleLines(packet.ui);
+                return reply;
+            }
+            int before = sent;
+            JsonObject event = next(packet.ui);
+            if (sent != before) files.beginStep();
+            return event;
+        }
+
+        /**
+         * Records the UI that answered the last event, ignoring its effects. Returns the next step's event, or null once
+         * the run is finished: after the last step's UI was evaluated, or when the next step's control is not on screen.
          */
         public JsonObject next(JsonObject ui) {
             if (entry != null) throw new IllegalStateException("The check has already finished");
@@ -279,8 +308,10 @@ public final class AppTestSuite {
 
     /**
      * Visible text of a validated UI tree, one line per element in reading order: text node text, button
-     * labels, choices option labels (selected ones prefixed "[selected] "), inputs as "label: value", image and
-     * graphic descriptions, and meters as "meter -12.0". Blank lines are omitted.
+     * labels, choices option labels (selected ones prefixed "[selected] "), list items as "title · supporting ·
+     * trailing" (prefixed "[checked] " or "[unchecked] " when checkable, "[selected] " when selected), inputs as
+     * "label: value", image and graphic descriptions, and meters as "meter -12.0". Cards and rows read as their
+     * contents. Blank lines are omitted.
      */
     public static List<String> visibleLines(JsonObject ui) {
         List<String> lines = new ArrayList<>();
@@ -313,12 +344,25 @@ public final class AppTestSuite {
         JsonObject node = element.getAsJsonObject();
         switch (text(node, "type")) {
             case "column":
+            case "card":
+            case "row":
                 JsonElement children = node.get("children");
                 if (children != null && children.isJsonArray()) {
                     for (JsonElement child : children.getAsJsonArray()) collect(child, depth + 1, lines);
                 }
                 break;
             case "text": add(lines, text(node, "text")); break;
+            case "item": {
+                StringBuilder line = new StringBuilder();
+                JsonElement checked = node.get("checked");
+                if (checked != null && checked.isJsonPrimitive() && checked.getAsJsonPrimitive().isBoolean()) line.append(checked.getAsBoolean() ? CHECKED : UNCHECKED);
+                JsonElement selected = node.get("selected");
+                if (selected != null && selected.isJsonPrimitive() && selected.getAsJsonPrimitive().isBoolean() && selected.getAsBoolean()) line.append(SELECTED);
+                line.append(text(node, "title"));
+                for (String part : new String[]{text(node, "supporting"), text(node, "trailing")}) if (!part.isBlank()) line.append(" · ").append(part);
+                add(lines, line.toString());
+                break;
+            }
             case "button": add(lines, text(node, "label")); break;
             case "input": {
                 String label = text(node, "label").strip();

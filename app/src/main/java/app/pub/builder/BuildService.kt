@@ -255,6 +255,7 @@ internal object BuildNotifications {
         val label = busy?.lowercase(Locale.ROOT).orEmpty()
         return when {
             "research" in label -> "Researching similar apps…"
+            "planning" in label -> "Planning the screens…"
             // Before the repair and "check" rules, so behavior testing is never shown as a screenshot check.
             "testing" in label -> "Testing the app…"
             "repair" in label || "fix" in label || "revis" in label -> "Improving the app preview…"

@@ -14,6 +14,7 @@ import app.pub.core.ChecksReport
 import app.pub.core.ProjectBundle
 import app.pub.core.ModelSelection
 import app.pub.core.ResearchBrief
+import app.pub.core.UiPlan
 import app.pub.projects.AppSpecStore
 import app.pub.projects.AppSpecStoreException
 import app.pub.projects.SavedProject
@@ -37,6 +38,8 @@ interface BuilderBackend {
     /** Generation for a change, given what the existing app was built from ([basis], data). Defaults to the form without it. */
     fun generateApp(model:String,request:String,context:String,existing:ProjectBundle?,basis:EditBasis?):GeneratedApp =
         generateApp(model,request,context,existing)
+    /** UI planning. null skips planning; throwing simulates a failed planning step. */
+    fun plan(model:String,request:String,existing:ProjectBundle?,brief:ResearchBrief?,stored:UiPlan?):UiPlan? = null
 }
 
 class BuilderController(private val application: Application, private val backend:BuilderBackend?=null,
@@ -56,6 +59,7 @@ class BuilderController(private val application: Application, private val backen
     private val auth=ChatGptAuth(application)
     private val generator=Generator(auth)
     private val researcher=Researcher(auth)
+    private val planner=UiPlanner(auth)
     private val historyStore=PromptHistoryStore(historyContext)
     private val specStore=AppSpecStore(historyContext)
     private val historyStartup=scope.async(Dispatchers.IO) { historyStore.recoverInterrupted() }
@@ -74,6 +78,9 @@ class BuilderController(private val application: Application, private val backen
         /** BuildNotifications.phase maps this label by its "research" substring. */
         const val RESEARCHING = "Researching similar apps…"
         const val BUILDING = "Building your app…"
+        /** BuildNotifications.phase maps this label by its "planning" substring. */
+        const val PLANNING = "Planning the screens…"
+        const val PLANNING_FAILED = "UI planning couldn't be completed, so PUB designed the screens while building."
         const val RESEARCH_WEB_UNAVAILABLE = "Web search isn't available with this ChatGPT connection, so research used the model's own knowledge."
         const val RESEARCH_FAILED = "Research couldn't be completed, so PUB built from your description alone."
         /** BuildNotifications.phase maps this label by its "testing" substring. */
@@ -111,6 +118,11 @@ class BuilderController(private val application: Application, private val backen
     // The research of the committed draft. It is what gets persisted and what repairs use; researchBrief may
     // meanwhile show a newer build's research that has no draft yet (and must not be restored with the old one).
     private var committedResearch: ResearchBrief? = null
+    override var uiPlan by mutableStateOf<UiPlan?>(null); private set
+    override var uiPlanNote by mutableStateOf<String?>(null); private set
+    // The UI plan of the committed draft, persisted with it and used by its repairs and visual review; uiPlan may
+    // meanwhile show a newer build's plan, like researchBrief.
+    private var committedPlan: UiPlan? = null
     // The build's behavior checks, fixed by its initial generation and persisted with its draft. Repairs are
     // judged against them but never replace them, so a repair cannot weaken the checks.
     override var draftTests by mutableStateOf<AppTestSuite?>(null); private set
@@ -211,6 +223,7 @@ class BuilderController(private val application: Application, private val backen
         visualReview=saved.visualReview;visualReviewError=saved.visualReviewError
         researchBrief=saved.research;researchNote=null;committedResearch=saved.research
         draftTests=saved.tests;checksReport=saved.checks
+        uiPlan=saved.uiPlan;uiPlanNote=null;committedPlan=saved.uiPlan
         checksError=saved.checks?.takeUnless { it.allPassed() }?.let { checksStillFail(it) }
         draftOrigin=saved.originalRequest?.takeIf { saved.draft!=null }
         hasBuildResult=saved.draft!=null || saved.running || saved.message!=null
@@ -221,7 +234,7 @@ class BuilderController(private val application: Application, private val backen
         check(draftStoreFailure==null) {draftStoreFailure!!}
         val snapshot=BuildDraftSnapshot(prompt,historySessionId,editingProject,draft,draftHistoryId,draftRequest,draftModel,
             draftRepairPass,message,visualReview,visualReviewError,running,committedResearch,draftTests,checksReport,
-            draftOrigin?.takeIf { draft!=null && it.isNotBlank() })
+            draftOrigin?.takeIf { draft!=null && it.isNotBlank() },committedPlan)
         draftMutex.withLock {withContext(Dispatchers.IO) {draftStore.write(snapshot)}}
     }
     private suspend fun settleBuild() {
@@ -263,7 +276,7 @@ class BuilderController(private val application: Application, private val backen
         val savedDraft=draft
         val ownsCurrent=draftHistoryId==historyId && !buildInProgress && savedDraft!=null
         // What the saved draft was built from, captured before anything (such as the following beginEdit) resets it.
-        val built=if(ownsCurrent) EditBasis(draftOriginalRequest(),committedResearch,draftTests) else null
+        val built=if(ownsCurrent) EditBasis(draftOriginalRequest(),committedResearch,draftTests,committedPlan) else null
         if(backgroundManaged && ownsCurrent) {saving=true;busy="Saving build result..."}
         scope.launch {
             // The app itself is already saved. Its spec follows it whatever happens to history, and a spec failure
@@ -283,6 +296,7 @@ class BuilderController(private val application: Application, private val backen
                         historySessionId=java.util.UUID.randomUUID().toString();prompt=""
                         visualReview=null;visualReviewError=null;researchBrief=null;researchNote=null;committedResearch=null
                         draftTests=null;checksReport=null;checksError=null;message=savedMessage
+                        uiPlan=null;uiPlanNote=null;committedPlan=null
                     }
                 }
             } catch (error: CancellationException) {throw error}
@@ -303,7 +317,7 @@ class BuilderController(private val application: Application, private val backen
         try {
             val now=System.currentTimeMillis()
             val stored=try {specStore.read(projectId)} catch(_:AppSpecStoreException) {null}
-            val spec=stored?.withBuild(built.brief,built.tests,now) ?: AppSpec.of(built.originalRequest,built.brief,built.tests,now)
+            val spec=stored?.withBuild(built.brief,built.tests,built.plan,now) ?: AppSpec.of(built.originalRequest,built.brief,built.tests,built.plan,now)
             specStore.write(projectId,spec)
             spec
         } catch(_:Exception) {
@@ -405,18 +419,26 @@ class BuilderController(private val application: Application, private val backen
     } catch(error:CancellationException) {throw error}
     catch(_:Exception) {null to RESEARCH_FAILED}
     /** An uncommitted build leaves an existing draft with its own research, which that draft's repairs reuse. */
-    private fun keepDraftResearch(brief:ResearchBrief?,note:String?) {
-        if(draft!=null) {researchBrief=brief;researchNote=note}
+    private fun keepDraftResearch(brief:ResearchBrief?,note:String?,plan:UiPlan?,planNote:String?) {
+        if(draft!=null) {researchBrief=brief;researchNote=note;uiPlan=plan;uiPlanNote=planNote}
     }
+    /**
+     * The UI plan for a build and a note when planning failed (the build then continues without a plan). For a change,
+     * [stored] is the app's current plan, which the planner returns updated. A fake backend's plan() is used instead.
+     */
+    private suspend fun planUi(model:String,request:String,context:String,brief:ResearchBrief?,existing:ProjectBundle?,stored:UiPlan?):Pair<UiPlan?,String?> = try {
+        network { if(backend!=null) backend.plan(model,request,existing,brief,stored) else planner.plan(model,request,context,brief,existing,stored) } to null
+    } catch(error:CancellationException) {throw error}
+    catch(_:Exception) {null to PLANNING_FAILED}
     override fun generate(context: String) {
         if(restoring || saving || busy!=null || capturePending!=null || !startBackgroundBuild()) return
         // Snapshot the submitted text/model/app before starting any asynchronous work.
         val request=prompt;val model=selectedModel;val base=editingProject
         val existing=draft ?: base?.bundle; val session=historySessionId
         // Research shown beside an earlier draft belongs to that draft until this build commits its own.
-        val draftResearch=researchBrief;val draftResearchNote=researchNote
+        val draftResearch=researchBrief;val draftResearchNote=researchNote;val draftPlan=uiPlan;val draftPlanNote=uiPlanNote
         // A build on the current draft builds on that draft's own original request, research and checks.
-        val draftBasis=if(draft!=null) EditBasis(draftOriginalRequest(),committedResearch,draftTests) else null
+        val draftBasis=if(draft!=null) EditBasis(draftOriginalRequest(),committedResearch,draftTests,committedPlan) else null
         val pendingSpec=specLoad
         operation(BUILDING) {
             check(model.isNotBlank()) { "Select an available model first" }
@@ -437,7 +459,7 @@ class BuilderController(private val application: Application, private val backen
                 // Otherwise an edit builds on the saved app's spec, waiting for it if it is still loading.
                 pendingSpec?.join()
                 val basis=draftBasis ?: editingSpec?.takeIf { base!=null && editingProject?.id==base.id }
-                    ?.let { EditBasis(it.request,it.brief,it.tests) }
+                    ?.let { EditBasis(it.request,it.brief,it.tests,it.uiPlan) }
                 busy=RESEARCHING
                 // With a stored brief, research returns the complete updated brief for the app after the change.
                 val (brief,note)=research(model,request,existing,basis?.brief)
@@ -445,11 +467,16 @@ class BuilderController(private val application: Application, private val backen
                 researchBrief=brief;researchNote=note
                 recordDetail(historyId,researchSummary(brief,note,brief!=null && basis?.brief!=null),PromptHistoryStore::recordResearch)
                 persistDraft()
+                busy=PLANNING
+                // The planner works from the research and the phone's screen; a change updates the app's current plan.
+                val (plan,planNote)=planUi(model,request,context,brief,existing,basis?.plan)
+                currentCoroutineContext().ensureActive()
+                uiPlan=plan;uiPlanNote=planNote
                 busy=BUILDING
-                val generated=network { (backend?.generateApp(model,request,context,existing,basis) ?: generator.generateApp(model,request,context,existing,brief,basis)) }
+                val generated=network { (backend?.generateApp(model,request,context,existing,basis) ?: generator.generateApp(model,request,context,existing,brief,basis,plan)) }
                 check(historyOutcome(historyId,"ready",generated.bundle.name)) { "The app was built, but its local prompt history could not be saved. Check available storage and try again." }
                 currentCoroutineContext().ensureActive()
-                draft=generated.bundle;draftHistoryId=historyId;draftRequest=request;draftModel=model;draftRepairPass=0;committedResearch=brief
+                draft=generated.bundle;draftHistoryId=historyId;draftRequest=request;draftModel=model;draftRepairPass=0;committedResearch=brief;committedPlan=plan
                 draftOrigin=basis?.originalRequest?.takeIf { it.isNotBlank() } ?: request
                 draftTests=generated.tests;checksReport=null;checksError=null
                 visualReview=null;visualReviewError=null
@@ -464,7 +491,7 @@ class BuilderController(private val application: Application, private val backen
                 // Once committed, this draft stays available, so its history must remain "ready" for Save.
                 if(!committed) {
                     historyOutcome(historyId,"cancelled")
-                    keepDraftResearch(draftResearch,draftResearchNote)
+                    keepDraftResearch(draftResearch,draftResearchNote,draftPlan,draftPlanNote)
                 }
                 throw error
             } catch(error: Exception) {
@@ -472,7 +499,7 @@ class BuilderController(private val application: Application, private val backen
                 if(!committed) {
                     if(backgroundManaged) visualReviewError="The build did not complete. Any previous draft has been kept."
                     historyOutcome(historyId,"failed")
-                    keepDraftResearch(draftResearch,draftResearchNote)
+                    keepDraftResearch(draftResearch,draftResearchNote,draftPlan,draftPlanNote)
                 }
                 if(error is PromptHistoryFullException) throw error
                 if(historyId==null) throw IllegalStateException("Could not save local prompt history. Existing history has been preserved; check available storage and try again.",error)
@@ -485,6 +512,7 @@ class BuilderController(private val application: Application, private val backen
         val hadResult=hasBuildResult || draftStoreFailure!=null
         draft=null;draftHistoryId=null;capturePending=null;visualReview=null;visualReviewError=null;hasBuildResult=false;message=null
         researchBrief=null;researchNote=null;committedResearch=null;draftTests=null;checksReport=null;checksError=null;draftOrigin=null
+        uiPlan=null;uiPlanNote=null;committedPlan=null
         if(backgroundManaged) {
             if(hadResult) busy="Discarding build result..."
             scope.launch {
@@ -507,10 +535,10 @@ class BuilderController(private val application: Application, private val backen
         operation("Checking screen ${capture.repairPass+1} of ${MAX_VISUAL_REPAIRS+1}...") {
             try {
                 // The checks report belongs to this capture's draft: it is reset on every commit and re-run before capture.
-                val brief=committedResearch;val checks=checksReport
+                val brief=committedResearch;val checks=checksReport;val plan=committedPlan
                 val result=network {
                     backend?.assess(capture.model,capture.request,capture.bundle,png)
-                        ?: VisualReview(auth).assess(capture.model,capture.request,capture.bundle,png,brief,checks)
+                        ?: VisualReview(auth).assess(capture.model,capture.request,capture.bundle,png,brief,checks,plan)
                 }
                 val findings=VisualReview.formatDecision(result)
                 visualReview=findings
@@ -570,12 +598,12 @@ class BuilderController(private val application: Application, private val backen
             currentCoroutineContext().ensureActive()
             reloadHistory()
             // Repairs reuse the draft's stored research; they never research again.
-            val brief=committedResearch
+            val brief=committedResearch;val plan=committedPlan
             // Comparing serializes both whole packages (images included), so it runs off the main thread.
             // Tests returned by a repair are ignored: the build keeps the checks of its initial generation.
             val (repaired,changed)=network {
                 val result=backend?.generateApp(capture.model,instruction,context,capture.bundle)?.bundle
-                    ?: generator.generate(capture.model,instruction,context,capture.bundle,brief)
+                    ?: generator.generate(capture.model,instruction,context,capture.bundle,brief,plan)
                 result to (result.toJson()!=capture.bundle.toJson())
             }
             repaired.requireReadyAssets()

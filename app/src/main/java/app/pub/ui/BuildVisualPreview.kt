@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.pub.core.ProjectBundle
+import app.pub.core.SimulatedFiles
 import app.pub.core.UiPacket
 import app.pub.runtime.RuntimeClient
 import com.google.gson.JsonObject
@@ -43,7 +44,10 @@ import kotlin.math.roundToInt
 /** NativeGraphic reports completion only while inside a review preview, never to the script. */
 internal val LocalBuildGraphicStatus = staticCompositionLocalOf<((JsonObject, Boolean) -> Unit)?> { null }
 
-/** A fresh, effects-disabled app surface. Its layer contains no builder controls or saved project data. */
+/**
+ * A fresh app surface whose only effects are simulated file replies (an empty private folder, nothing picked). Its
+ * layer contains no builder controls or saved project data.
+ */
 @Composable
 fun BuildVisualPreview(
     bundle: ProjectBundle,
@@ -127,6 +131,8 @@ private class VisualPreviewSession(
     private var rasterRevision by mutableIntStateOf(0)
     private val expectedRasters = IdentityHashMap<JsonObject, Boolean>()
     private var runtime: RuntimeClient? = null
+    /** An empty in-memory folder, so an app that loads its files shows its real first screen instead of "loading". */
+    private val files = SimulatedFiles()
     private val main = Handler(Looper.getMainLooper())
     // This bounds native runtime/image/draw work, not animation time. Compose test clocks and
     // private frame clocks may advance independently of Android rendering and real elapsed time.
@@ -151,8 +157,12 @@ private class VisualPreviewSession(
     }
     private fun receive(packet: UiPacket) {
         if (finished || ui != null) return
-        // Deliberately discard packet.effects. This client has no broker, permission hooks, storage,
-        // action dispatch, hardware event loop, or persisted-image resolver.
+        // File requests are answered from the simulated folder, one reply per packet, and the screen captured is the
+        // one after the last reply (at most SimulatedFiles.MAX_REPLIES_PER_STEP). Every other effect is discarded:
+        // this client has no broker, permission hooks, storage, action dispatch, hardware event loop, or
+        // persisted-image resolver.
+        files.accept(packet.effects)
+        files.next()?.let { reply -> runtime?.send(reply); return }
         try {
             fun visit(node: JsonObject) {
                 if (node["type"].asString == "graphic") {

@@ -17,8 +17,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import android.widget.Toast
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import java.util.concurrent.atomic.AtomicReference
 
 /** Dictation belongs to the builder, never to the generated project's microphone grant. */
 @Composable
@@ -106,3 +110,40 @@ fun VoicePromptButton(
 }
 
 private const val MAX_DESCRIPTION = 8000
+
+/**
+ * Dictation for a running app's inputs ([Dictation]): the same system speech service as the builder's voice input,
+ * offline where the phone supports it. PUB never records audio and the app only receives the recognized text, so no
+ * microphone permission is involved. Returns null while voice input is blocked in Settings → Access; a result that
+ * arrives after a block is dropped.
+ */
+@Composable
+fun rememberAppDictation(blocked: Boolean): Dictation? {
+    val context = LocalContext.current
+    val language = LocalConfiguration.current.locales[0].toLanguageTag()
+    val currentBlocked by rememberUpdatedState(blocked)
+    val pending = remember { AtomicReference<((String) -> Unit)?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val deliver = pending.getAndSet(null)
+        if (currentBlocked || result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull { it.isNotBlank() }?.trim()
+            ?.let { words -> deliver?.invoke(words) }
+    }
+    val dictation = remember(launcher, language) {
+        Dictation { label, onText ->
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, label.take(80))
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            }
+            pending.set(onText)
+            val failure = try { launcher.launch(intent); null }
+                catch (_: ActivityNotFoundException) { "No speech service is available. Enable one in Android settings, or type instead." }
+                catch (_: RuntimeException) { "Voice input could not open. Try again or type instead." }
+            if (failure != null) { pending.set(null); Toast.makeText(context, failure, Toast.LENGTH_LONG).show() }
+        }
+    }
+    return if (blocked) null else dictation
+}

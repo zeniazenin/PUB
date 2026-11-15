@@ -422,11 +422,14 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     }
     fun action(value: String) { if (!projectOpen) return; hardwareIntent = true; runtime?.send(event("action").apply { addProperty("action", value) }) }
     // Each keystroke carries the field's full text, so only the newest pending value per field is needed.
-    fun input(action: String, value: String) { runtime?.send(event("input").apply { addProperty("action", action); addProperty("value", value.take(2000)) }, key = "input:$action") }
+    fun input(action: String, value: String) { runtime?.send(event("input").apply { addProperty("action", action); addProperty("value", value.take(app.pub.core.UiPacket.MAX_MULTILINE_VALUE)) }, key = "input:$action") }
     fun setVisible(value: Boolean) {
+        val returning = value && !visible
         visible = value
         broker.setForeground(value && projectOpen)
         if (!value) { endHardware(keepFilePicker = true);askPermission = false; askAndroidPermission = false }
+        // An app back on screen can refresh what depends on the time (such as today's date) without a button.
+        if (returning && projectOpen) runtime?.send(event("resume"), key = "resume")
     }
     fun stop() = broker.stop()
     fun allowSession() { val requested = askPermission; askPermission = false; if (requested && visible && projectOpen) broker.allowOnce() }

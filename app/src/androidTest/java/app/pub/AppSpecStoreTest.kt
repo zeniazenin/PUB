@@ -66,7 +66,7 @@ class AppSpecStoreTest {
         store.write(app, spec())
         val file = File(directory, "app-specs/$app.json")
         val valid = file.readText()
-        val invalid = listOf("{broken".toByteArray(), valid.replace("\"version\":1", "\"version\":2").toByteArray(),
+        val invalid = listOf("{broken".toByteArray(), valid.replace("\"version\":2", "\"version\":3").toByteArray(),
             valid.replaceFirst("{", "{\"photos\":[],").toByteArray(), byteArrayOf(0xc3.toByte(), 0x28))
         invalid.forEach { bytes ->
             file.writeBytes(bytes)

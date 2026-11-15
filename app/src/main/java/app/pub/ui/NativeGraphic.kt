@@ -75,7 +75,7 @@ fun NativeGraphic(
     val shapes = remember(asset) { asset["shapes"].asJsonArray.map { element ->
         val shape = element.asJsonObject
         val isLine = shape["type"].asString == "line"
-        DrawingShape(shape, if (shape["type"].asString == "path") shapePath(shape) else null, shape["id"].asString, isLine,
+        DrawingShape(shape, if (shape["type"].asString == "path") graphicShapePath(shape) else null, shape["id"].asString, isLine,
             shapeColor(shape["fill"]?.asString ?: if (isLine) "transparent" else "onSurface"),
             shapeColor(shape["stroke"]?.asString ?: if (isLine) "outline" else "transparent"),
             shape["strokeWidth"]?.asFloat ?: 1f)
@@ -157,7 +157,8 @@ private fun drawShape(canvas: android.graphics.Canvas, drawing: DrawingShape, pa
         "text" -> { paint.textSize = shape.f("size"); canvas.drawText(shape["text"].asString, shape.f("x"), shape.f("y"), paint) }
     }
 }
-private fun shapePath(shape: JsonObject) = Path().apply {
+/** Path geometry of a validated vector path shape; shared with launcher pictograms. */
+internal fun graphicShapePath(shape: JsonObject) = Path().apply {
     shape["commands"].asJsonArray.forEach { element ->
         val command = element.asJsonArray
         when (command[0].asString) {

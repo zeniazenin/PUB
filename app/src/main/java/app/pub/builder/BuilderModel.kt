@@ -40,6 +40,10 @@ interface BuilderState {
     val researchBrief:app.pub.core.ResearchBrief?
     /** Short notice when research fell back to model knowledge or could not complete. */
     val researchNote:String?
+    /** The build's UI plan (from the planning step), shown beside its research. */
+    val uiPlan:app.pub.core.UiPlan?
+    /** Why the latest build has no UI plan, when planning failed. */
+    val uiPlanNote:String?
     /**
      * The build's behavior checks, fixed by its initial generation. null when none were requested (fake
      * backends, older drafts); empty when they were requested but the model supplied none that were usable.

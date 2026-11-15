@@ -121,6 +121,94 @@ public class BehaviorChecksEndToEndTest {
         assertTrue(run(CORRECT, AppTestSuite.parse("[{\"name\":\"Fresh start\",\"expect\":[\"Bill amount: \",\"Enter the bill amount.\"]}]")).allPassed());
     }
 
+    /** A journal that keeps one file per entry: it lists at init, and after each save lists and reads every entry again. */
+    private static final String JOURNAL = String.join("\n",
+        "var titles = [], waiting = [], status = 'Loading entries...', draft = '', serial = 0;",
+        "function req(op, args) { return {type:'files.request', id:'r' + (++serial), operation:op, args:args}; }",
+        "function view() {",
+        "  var c = [{type:'text', text:'Journal', style:'display'}, {type:'text', text:status}];",
+        "  titles.forEach(function (t) { c.push({type:'text', text:'Entry: ' + t}); });",
+        "  c.push({type:'input', label:'Title', action:'title', value:draft});",
+        "  c.push({type:'button', label:'Save', action:'save'});",
+        "  return c;",
+        "}",
+        "function dispatch(raw) {",
+        "  var e = JSON.parse(raw), fx = [];",
+        "  if (e.type === 'init') fx.push(req('list', {path:'entries'}));",
+        "  else if (e.type === 'input' && e.action === 'title') draft = String(e.value);",
+        "  else if (e.type === 'action' && e.action === 'save' && draft.trim()) {",
+        "    status = 'Saving...';",
+        "    fx.push(req('write', {path:'entries/entry-' + (titles.length + 1) + '.txt', data:draft, encoding:'utf8'}));",
+        "  } else if (e.type === 'files') {",
+        "    if (!e.ok) status = e.code === 'not_found' ? 'No entries yet' : 'Error: ' + e.message;",
+        "    else if (e.operation === 'write') { draft = ''; fx.push(req('list', {path:'entries'})); }",
+        "    else if (e.operation === 'list') {",
+        "      titles = []; waiting = e.entries.map(function (x) { return x.path; });",
+        "      status = waiting.length ? 'Loading entries...' : 'No entries yet';",
+        "      if (waiting.length) fx.push(req('read', {path:waiting.shift(), encoding:'utf8'}));",
+        "    } else if (e.operation === 'read') {",
+        "      titles.push(e.data);",
+        "      if (waiting.length) fx.push(req('read', {path:waiting.shift(), encoding:'utf8'}));",
+        "      else status = titles.length + ' saved';",
+        "    }",
+        "  }",
+        "  return JSON.stringify({ui:{type:'column', children:view()}, effects:fx});",
+        "}");
+    private static final String JOURNAL_SUITE = "[" +
+        "{\"name\":\"Starts empty\",\"steps\":[],\"expect\":[\"No entries yet\"],\"expectAbsent\":[\"Loading\"]}," +
+        "{\"name\":\"Saved entry is listed\",\"steps\":[{\"type\":\"input\",\"action\":\"title\",\"value\":\"Groceries\"},{\"type\":\"action\",\"action\":\"save\"}]," +
+        "\"expect\":[\"Entry: Groceries\",\"1 saved\",\"Title: \"],\"expectAbsent\":[\"Saving\"]}," +
+        "{\"name\":\"Two entries\",\"steps\":[{\"type\":\"input\",\"action\":\"title\",\"value\":\"First\"},{\"type\":\"action\",\"action\":\"save\"}," +
+        "{\"type\":\"input\",\"action\":\"title\",\"value\":\"Second\"},{\"type\":\"action\",\"action\":\"save\"}],\"expect\":[\"Entry: First\",\"Entry: Second\",\"2 saved\"]}" +
+        "]";
+
+    /** The host's loop with file replies: each packet goes to Run.next(UiPacket), which answers file requests first. */
+    private static ChecksReport runWithFiles(String source, AppTestSuite suite) {
+        List<ChecksReport.Entry> results = new ArrayList<>();
+        for (AppTestSuite.TestCase test : suite.tests) {
+            ScriptEngine engine = new ScriptEngine();
+            AppTestSuite.Run run = new AppTestSuite.Run(test);
+            try {
+                engine.load(source);
+                JsonObject event = AppTestSuite.Run.initEvent(DEVICE);
+                while (event != null) event = run.next(UiPacket.parse(engine.dispatch(event.toString())));
+            } catch (RuntimeException | ScriptEngine.BudgetExceeded error) {
+                run.fail(error.getMessage());
+            }
+            results.add(run.entry());
+        }
+        return ChecksReport.of(results);
+    }
+
+    @Test public void fileBasedAppsAreCheckedAgainstAnEmptySimulatedFolder() {
+        ChecksReport report = runWithFiles(JOURNAL, AppTestSuite.parse(JOURNAL_SUITE));
+        assertTrue(report.toJson(), report.allPassed());
+        // Without file replies the app never leaves its loading state, which is what checks saw before.
+        ChecksReport ignored = run(JOURNAL, AppTestSuite.parse(JOURNAL_SUITE));
+        assertEquals(0, ignored.passed);
+        assertTrue(ignored.results.get(0).detail, ignored.results.get(0).detail.contains("Loading entries..."));
+        // Every test starts from an empty folder: entries saved by one test are never seen by the next.
+        ChecksReport fresh = runWithFiles(JOURNAL, AppTestSuite.parse("[" +
+            "{\"name\":\"Save\",\"steps\":[{\"type\":\"input\",\"action\":\"title\",\"value\":\"Kept\"},{\"type\":\"action\",\"action\":\"save\"}],\"expect\":[\"1 saved\"]}," +
+            "{\"name\":\"Fresh\",\"steps\":[],\"expect\":[\"No entries yet\"],\"expectAbsent\":[\"Kept\"]}]"));
+        assertTrue(fresh.toJson(), fresh.allPassed());
+    }
+
+    @Test public void theVisualReviewSeesTheEmptyStateAfterInitsReplies() throws Exception {
+        // VisualPreviewSession's loop: answer each packet's file requests until none waits, then capture.
+        ScriptEngine engine = new ScriptEngine();
+        engine.load(JOURNAL);
+        SimulatedFiles files = new SimulatedFiles();
+        UiPacket packet = UiPacket.parse(engine.dispatch(AppTestSuite.Run.initEvent(DEVICE).toString()));
+        while (true) {
+            files.accept(packet.effects);
+            JsonObject reply = files.next();
+            if (reply == null) break;
+            packet = UiPacket.parse(engine.dispatch(reply.toString()));
+        }
+        assertTrue(AppTestSuite.visibleText(packet.ui).contains("No entries yet"));
+    }
+
     @Test(timeout = 5000) public void runawayScriptFailsItsCheckWithinTheBudget() {
         String loop = CORRECT.replace("bill = ''; tip = 15; people = '1';", "while (true) {}");
         ChecksReport report = run(loop, AppTestSuite.parse(SUITE));

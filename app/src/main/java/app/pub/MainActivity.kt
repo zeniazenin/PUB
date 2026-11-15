@@ -257,7 +257,8 @@ private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, sa
     }
     key(model.projectId) {
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp).testTag("running-app"),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-            model.ui?.let { NativeRenderer(it,model::action,model::input,model::resolveImage,model::graphicAsset) } ?: Text(model.failure ?: "Opening app…")
+            val dictation = rememberAppDictation(blocked = model.globalBlocked)
+            model.ui?.let { NativeRenderer(it,model::action,model::input,model::resolveImage,model::graphicAsset,dictation) } ?: Text(model.failure ?: "Opening app…")
             if(model.failure!=null) {
                 Text(model.failure!!,color=MaterialTheme.colorScheme.error)
                 Button(onClick=model::restart) { Text("Restart app") }

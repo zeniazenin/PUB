@@ -40,7 +40,7 @@ object BuildEnvironment {
             addProperty("pickedFolderNameCharacters",PhoneFilesContract.MAX_NAME_CHARS);addProperty("pickedFolderPathDepth",PhoneFilesContract.MAX_DEPTH)
             addProperty("pickedFolderEntriesListed",PhoneFilesContract.MAX_FOLDER_CHILDREN);addProperty("pendingPhoneFileRequests",PhoneFilesContract.MAX_PENDING)
         })
-        add("uiComponents",JsonArray().apply {listOf("column","text","button","input","choices","meter","image","graphic").forEach {add(it)}})
+        add("uiComponents",JsonArray().apply {listOf("column","card","row","text","item","button","input","choices","meter","image","graphic").forEach {add(it)}})
         add("microphonePitch",JsonObject().apply {
             addProperty("minimumHz",65);addProperty("maximumHz",400)
             addProperty("measurement","Host pitch estimates only, no raw audio or recording. Frequency range does not cover all bass/ukulele notes.")

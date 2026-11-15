@@ -1,8 +1,6 @@
 package app.pub.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
@@ -16,13 +14,6 @@ import app.pub.projects.SavedProject
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -78,20 +69,6 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
 @Composable
 private fun LauncherTile(id: String, name: String, graphic: com.google.gson.JsonObject? = null, onEdit: () -> Unit, onDelete: () -> Unit, onOpen: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
-    val colors = MaterialTheme.colorScheme
-    val palette = listOf(
-        colors.primary,
-        lerp(colors.primary, colors.tertiary, .4f),
-        lerp(colors.primary, colors.onSurface, .28f),
-        lerp(colors.primary, colors.tertiary, .75f)
-    )
-    val tint = palette[(id.hashCode() ushr 1) % palette.size]
-    val iconBackground = lerp(colors.surface, tint, .15f)
-    // Apps without an icon asset get a glyph chosen from their name, else a monogram.
-    val tuner = name.contains("tuner", ignoreCase = true)
-    val calculator = name.contains("calc", ignoreCase = true) || name.contains("tip", ignoreCase = true)
-    val words = name.trim().split(Regex("\\s+")).map { word -> word.filter { it.isLetterOrDigit() } }.filter { it.isNotEmpty() }
-    val monogram = if (words.size > 1) "${words.first().first()}${words.last().first()}" else words.firstOrNull()?.take(2) ?: "AP"
     Box {
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
@@ -100,14 +77,7 @@ private fun LauncherTile(id: String, name: String, graphic: com.google.gson.Json
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Box(Modifier.size(80.dp).clip(RoundedCornerShape(24.dp)).background(iconBackground), contentAlignment = Alignment.Center) {
-            when {
-                graphic != null -> NativeGraphic(graphic, "$name icon", modifier=Modifier.size(68.dp), maxDecodeSize=256)
-                tuner -> TunerGlyph(tint, iconBackground)
-                calculator -> CalculatorGlyph(tint)
-                else -> Text(monogram.uppercase(), color = tint, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Medium)
-            }
-        }
+        AppIconTile(name, graphic)
         Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
             style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
     }
@@ -118,27 +88,3 @@ private fun LauncherTile(id: String, name: String, graphic: com.google.gson.Json
     }
 }
 
-@Composable
-private fun TunerGlyph(tint: Color, background: Color) {
-    Canvas(Modifier.size(42.dp)) {
-        val stroke = 2.5.dp.toPx()
-        listOf(.22f to .34f, .5f to .68f, .78f to .43f).forEach { (x, knob) ->
-            val center = Offset(size.width * x, size.height * knob)
-            drawLine(tint, Offset(size.width * x, size.height * .12f), Offset(size.width * x, size.height * .88f), stroke, StrokeCap.Round)
-            drawCircle(background, 4.5.dp.toPx(), center)
-            drawCircle(tint, 4.5.dp.toPx(), center, style = Stroke(stroke))
-        }
-    }
-}
-
-@Composable
-private fun CalculatorGlyph(tint: Color) {
-    Canvas(Modifier.size(44.dp)) {
-        val stroke = 2.2.dp.toPx()
-        drawRoundRect(tint, Offset(size.width * .18f, size.height * .06f), Size(size.width * .64f, size.height * .88f), CornerRadius(5.dp.toPx()), style = Stroke(stroke))
-        drawRoundRect(tint, Offset(size.width * .29f, size.height * .19f), Size(size.width * .42f, size.height * .16f), CornerRadius(1.5.dp.toPx()), style = Stroke(stroke))
-        for (row in 0..2) for (column in 0..1) {
-            drawCircle(tint, 1.8.dp.toPx(), Offset(size.width * (.35f + column * .3f), size.height * (.49f + row * .15f)))
-        }
-    }
-}

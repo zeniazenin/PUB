@@ -72,10 +72,12 @@ public final class ResearchBrief {
 
         /**
          * Tolerant constructor for links read from a response: returns null unless url is a safe https URL.
-         * The title is cleaned and shortened; a blank title falls back to the link's host.
+         * OpenAI's utm_source=openai tag is removed from the link. The title is cleaned and shortened; a blank
+         * title falls back to the link's host.
          */
         public static Source of(String title, String url) {
             if (!isSafeUrl(url)) return null;
+            url = withoutTracking(url);
             String clean = title == null ? "" : clean(title).replace('\n', ' ').replaceAll(" {2,}", " ").strip();
             if (clean.isEmpty()) clean = URI.create(url).getHost();
             if (clean.length() > MAX_TITLE) {
@@ -101,6 +103,26 @@ public final class ResearchBrief {
             } catch (URISyntaxException error) {
                 return false;
             }
+        }
+
+        /**
+         * Removes the utm_source=openai parameter that web search appends to result links, keeping every other
+         * query parameter (such as an app store id) and the fragment. Applied to a URL that already passed
+         * {@link #isSafeUrl}; the result is a substring-only edit of it, so it stays safe.
+         */
+        static String withoutTracking(String url) {
+            int hash = url.indexOf('#');
+            int queryStart = url.indexOf('?');
+            // A '?' inside the fragment is not a query.
+            if (queryStart < 0 || (hash >= 0 && hash < queryStart)) return url;
+            int fragmentStart = hash;
+            String query = fragmentStart < 0 ? url.substring(queryStart + 1) : url.substring(queryStart + 1, fragmentStart);
+            StringBuilder kept = new StringBuilder();
+            for (String part : query.split("&")) {
+                if (part.isEmpty() || part.equalsIgnoreCase("utm_source=openai")) continue;
+                kept.append(kept.length() == 0 ? "?" : "&").append(part);
+            }
+            return url.substring(0, queryStart) + kept + (fragmentStart < 0 ? "" : url.substring(fragmentStart));
         }
 
         /** Identity for de-duplication: case-insensitive host, no fragment and no utm_source=openai tag. */
@@ -371,7 +393,8 @@ public final class ResearchBrief {
         }
         reader.endObject();
         if (title == null || url == null || title.indexOf('\n') >= 0) throw invalid();
-        return new Source(title, url);
+        // Briefs stored before tracking tags were stripped are cleaned when read.
+        return new Source(title, Source.withoutTracking(url));
     }
 
     private static String text(JsonReader reader, int limit, boolean model) throws IOException {

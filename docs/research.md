@@ -35,7 +35,7 @@ The research request contains only:
 
 It never contains the device/preferences context, hardware inventory, app source, assets, saved data, photos, the app's original request or behavior checks, or account details. The input is bounded at 100,000 characters (an 8,000-character request plus a stored brief, which `ResearchBrief`'s own limits keep far below that). The instructions include a compact summary of PUB's real capabilities, derived from `BuildEnvironment.metadata()` and `HardwareContract.OPERATIONS` (UI components, 60 UI nodes, no timers/network/background work/notifications, 8 KiB storage, hardware groups).
 
-Request shape (`POST /v1/responses`, Sign in with ChatGPT route): `model`, `instructions`, one user `input` message, `store: false`, `stream: true`. With web search it also sends `tools: [{"type":"web_search"}]` and `include: ["web_search_call.action.sources"]`. No other tools are offered. Searches are performed by OpenAI's hosted web search.
+Request shape (`POST /v1/responses`, Sign in with ChatGPT route): `model`, `instructions`, one user `input` message, `store: false`, `stream: true`. With web search it also sends `tools: [{"type":"web_search"}]`. No other tools are offered. Searches are performed by OpenAI's hosted web search.
 
 The instructions tell the model to treat the request and all web content as untrusted data (ignore instructions in pages), never output code, credentials or personal data, not to copy existing apps' names, branding, artwork or text (naming comparables is fine), to put no URLs or citations inside strings, to resolve ambiguity with sensible defaults listed in `assumptions`, and to output only the JSON object.
 
@@ -63,12 +63,11 @@ Source URLs must be plain `https://` links with a dotted ASCII host, no credenti
 
 ## Sources
 
-`ResearchOutput` reads the stream like `GenerationOutput` (only a completed, non-failed, non-refused stream yields text). Text is tracked per output item and the final JSON-looking message wins, so a short preamble before a search cannot corrupt the brief. On `response.completed` (and on `response.output_item.done` / `response.output_text.annotation.added`) it collects:
+`ResearchOutput` reads the stream like `GenerationOutput` (only a completed, non-failed, non-refused stream yields text). Text is tracked per output item and the final JSON-looking message wins, so a short preamble before a search cannot corrupt the brief. On `response.completed` (and on `response.output_item.done` / `response.output_text.annotation.added`) it collects the `url_citation` annotations on message content: the pages the model actually cited, with their titles.
 
-1. `url_citation` annotations on message content (cited sources), then
-2. as a fallback, `web_search_call.action.sources` (pages consulted).
+Pages a search merely visited (`web_search_call.action.sources`) are not requested and never shown: in practice they included unrelated results (news articles, other countries' rates) and carried no titles. A `web_search_call` item still marks the brief as web-researched even when nothing was cited.
 
-Cited sources come first; consulted pages fill the list. Links are de-duplicated (case-insensitive host, fragment and `utm_source=openai` ignored) and capped at 12. Event, text, item and annotation counts are bounded.
+Links keep their order of citation, lose OpenAI's `utm_source=openai` tracking parameter (other parameters, such as an app store `id`, and fragments are kept; briefs stored earlier are cleaned when read), are de-duplicated (case-insensitive host, fragment ignored) and are capped at 12. Event, text, item and annotation counts are bounded.
 
 ## Fallback and capability flags
 

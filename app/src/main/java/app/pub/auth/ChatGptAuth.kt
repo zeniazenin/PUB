@@ -309,11 +309,9 @@ class ChatGptAuth(context: Context) {
         val body = JsonObject().apply {
             addProperty("model", model); addProperty("instructions", instructions)
             add("input", JsonArray().apply { add(JsonObject().apply { addProperty("role", "user"); addProperty("content", input) }) })
-            if (webSearch) {
-                add("tools", JsonArray().apply { add(JsonObject().apply { addProperty("type", "web_search") }) })
-                // Lists the pages each search consulted; used when the answer itself carries no citations.
-                add("include", JsonArray().apply { add("web_search_call.action.sources") })
-            }
+            // Sources come from the answer's url_citation annotations. The pages a search merely visited are not
+            // requested: they include unrelated results and carry no titles.
+            if (webSearch) add("tools", JsonArray().apply { add(JsonObject().apply { addProperty("type", "web_search") }) })
             addProperty("store", false); addProperty("stream", true)
         }
         val request = Request.Builder().url("$RESOURCE/responses").header("Authorization", "Bearer ${accessToken()}")

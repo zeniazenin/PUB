@@ -186,7 +186,7 @@ public class ResearchBriefTest {
         String stored = brief.toJson();
         ResearchBrief restored = ResearchBrief.parse(stored);
         assertEquals(stored, restored.toJson());
-        assertTrue(restored.web); assertEquals("https://example.com/tipping?utm_source=openai", restored.sources.get(0).url);
+        assertTrue(restored.web); assertEquals("https://example.com/tipping", restored.sources.get(0).url);
         assertEquals(java.util.Set.of("summary", "category", "comparables", "features", "logic", "ux", "pitfalls",
                 "acceptanceChecks", "assumptions", "sources", "web"), JsonParser.parseString(stored).getAsJsonObject().keySet());
         // A model-knowledge brief stores an explicit empty source list.
@@ -221,6 +221,22 @@ public class ResearchBriefTest {
         invalid.addAll(List.of(blankTitle.toString(), longTitle.toString(), duplicate.toString(), tooMany.toString()));
         for (String json : invalid) assertThrows(IllegalArgumentException.class, () -> ResearchBrief.parse(json));
         assertThrows(IllegalArgumentException.class, () -> ResearchBrief.parse(" ".repeat(ResearchBrief.MAX_STORED_JSON_CHARS + 1)));
+    }
+    @Test public void openAiTrackingTagIsRemovedAndOtherParametersKept() {
+        String[][] cases = {
+                {"https://example.com/a?utm_source=openai", "https://example.com/a"},
+                {"https://play.google.com/store/apps/details?id=com.x.y&utm_source=openai", "https://play.google.com/store/apps/details?id=com.x.y"},
+                {"https://example.com/a?hl=en&utm_source=openai&x=1#part", "https://example.com/a?hl=en&x=1#part"},
+                {"https://example.com/a?UTM_SOURCE=OPENAI#top", "https://example.com/a#top"},
+                {"https://example.com/a?utm_source=newsletter", "https://example.com/a?utm_source=newsletter"},
+                {"https://example.com/a#q?utm_source=openai", "https://example.com/a#q?utm_source=openai"},
+                {"https://example.com/plain", "https://example.com/plain"}};
+        for (String[] c : cases) assertEquals(c[1], ResearchBrief.Source.of("T", c[0]).url);
+        // Briefs stored before the tag was stripped are cleaned when read.
+        JsonObject stored = JsonParser.parseString(ResearchBrief.parseModelOutput(valid().toString())
+                .withSources(List.of(ResearchBrief.Source.of("Guide", "https://example.com/a")), true).toJson()).getAsJsonObject();
+        stored.getAsJsonArray("sources").get(0).getAsJsonObject().addProperty("url", "https://example.com/a?utm_source=openai");
+        assertEquals("https://example.com/a", ResearchBrief.parse(stored.toString()).sources.get(0).url);
     }
     @Test public void withSourcesDeduplicatesAndKeepsAtMostTwelve() {
         List<ResearchBrief.Source> sources = new ArrayList<>();

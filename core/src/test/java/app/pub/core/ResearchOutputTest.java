@@ -78,21 +78,22 @@ public class ResearchOutputTest {
         assertTrue(out.accept("{\"type\":\"error\"}")); // Ignored once complete.
         assertEquals(BRIEF, out.finish());
         List<ResearchBrief.Source> sources = out.sources();
-        assertEquals(3, sources.size());
+        // Only cited pages are sources; the page the search merely visited is not, and OpenAI's tag is removed.
+        assertEquals(2, sources.size());
         assertEquals("NIST guide", sources.get(0).title);
-        assertEquals("https://www.nist.gov/guide?utm_source=openai", sources.get(0).url);
+        assertEquals("https://www.nist.gov/guide", sources.get(0).url);
         assertEquals("apps.example.com", sources.get(1).title);
-        assertEquals("https://consulted.example.org/review", sources.get(2).url);
+        assertTrue(sources.stream().noneMatch(s -> s.url.contains("consulted.example.org")));
         assertTrue(out.webSearchUsed());
         ResearchBrief brief = ResearchBrief.parseModelOutput(out.finish()).withSources(sources, out.webSearchUsed());
         assertEquals(brief.toJson(), ResearchBrief.parse(brief.toJson()).toJson());
     }
-    @Test public void consultedSourcesAreTheFallbackWhenNothingIsCited() {
+    @Test public void visitedPagesAreNeverSourcesButStillCountAsWebResearch() {
         ResearchOutput out = new ResearchOutput();
         out.accept(delta("msg_1", BRIEF));
         out.accept("{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":" + search("https://a.example.com/1", "https://b.example.com/2") + "}");
         assertTrue(out.accept(completed(message("msg_1", BRIEF))));
-        assertEquals(List.of("https://a.example.com/1", "https://b.example.com/2"), out.sources().stream().map(s -> s.url).toList());
+        assertTrue(out.sources().isEmpty());
         assertTrue(out.webSearchUsed());
     }
     @Test public void streamedAnnotationEventsAndNestedCitationsAreCollected() {
@@ -115,9 +116,7 @@ public class ResearchOutputTest {
         List<ResearchBrief.Source> sources = out.sources();
         assertEquals(ResearchBrief.MAX_SOURCES, sources.size());
         assertEquals("Source 0", sources.get(0).title); assertEquals("Source 11", sources.get(11).title);
-        ResearchOutput fallback = new ResearchOutput();
-        fallback.accept(completed(search(consulted), message("msg_1", BRIEF)));
-        assertEquals(ResearchBrief.MAX_SOURCES, fallback.sources().size());
+        assertTrue(sources.stream().noneMatch(s -> s.url.startsWith("https://other.example.com/")));
     }
     @Test public void completedMessageTextIsUsedWhenNoDeltasStreamed() {
         ResearchOutput out = new ResearchOutput();

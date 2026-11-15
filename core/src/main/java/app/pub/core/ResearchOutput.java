@@ -10,9 +10,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Streamed research response. Like GenerationOutput, only a completed stream yields text. Sources are read
- * from the response itself: url_citation annotations first, then the pages web_search_call reports it
- * consulted as a fallback. Only safe https links are kept, de-duplicated and bounded. Never echoes payloads.
+ * Streamed research response. Like GenerationOutput, only a completed stream yields text. Sources are the
+ * url_citation annotations of the answer: pages the model actually cited, with their titles. Pages a search
+ * merely visited are not sources (they include unrelated results and have no titles). Only safe https links
+ * are kept, de-duplicated and bounded. Never echoes payloads.
  */
 public final class ResearchOutput {
     public static final int MAX_EVENT_CHARS = 1_000_000;
@@ -20,7 +21,6 @@ public final class ResearchOutput {
     private static final int MAX_OUTPUT_ITEMS = 256;
     private static final int MAX_CONTENT_PARTS = 64;
     private static final int MAX_ANNOTATIONS = 1024;
-    private static final int MAX_ACTION_SOURCES = 256;
 
     // A tool-using model may write a short message before searching; text is kept per output item.
     private final Map<String, StringBuilder> streamed = new LinkedHashMap<>();
@@ -28,7 +28,6 @@ public final class ResearchOutput {
     private int textChars;
     private int completedChars;
     private final Map<String, ResearchBrief.Source> cited = new LinkedHashMap<>();
-    private final Map<String, ResearchBrief.Source> consulted = new LinkedHashMap<>();
     private boolean completed;
     private boolean searched;
 
@@ -96,18 +95,11 @@ public final class ResearchOutput {
         return result;
     }
 
-    /** Cited sources first, then other consulted pages, unique by URL, at most {@link ResearchBrief#MAX_SOURCES}. */
-    public List<ResearchBrief.Source> sources() {
-        Map<String, ResearchBrief.Source> merged = new LinkedHashMap<>(cited);
-        for (Map.Entry<String, ResearchBrief.Source> entry : consulted.entrySet()) {
-            if (merged.size() == ResearchBrief.MAX_SOURCES) break;
-            merged.putIfAbsent(entry.getKey(), entry.getValue());
-        }
-        return List.copyOf(merged.values());
-    }
+    /** The cited sources in citation order, unique by URL, at most {@link ResearchBrief#MAX_SOURCES}. */
+    public List<ResearchBrief.Source> sources() { return List.copyOf(cited.values()); }
 
     /** Whether the response actually ran a web search or cited a web page. */
-    public boolean webSearchUsed() { return searched || !cited.isEmpty() || !consulted.isEmpty(); }
+    public boolean webSearchUsed() { return searched || !cited.isEmpty(); }
 
     private static String pick(List<String> messages) {
         String fallback = null;
@@ -132,15 +124,6 @@ public final class ResearchOutput {
         String type = string(item, "type");
         if ("web_search_call".equals(type)) {
             searched = true;
-            JsonObject action = object(item.get("action"));
-            JsonArray found = action == null ? null : array(action.get("sources"));
-            if (found == null) return;
-            int count = 0;
-            for (JsonElement element : found) {
-                if (++count > MAX_ACTION_SOURCES) break;
-                JsonObject source = object(element);
-                if (source != null) add(consulted, string(source, "title"), string(source, "url"));
-            }
         } else if ("message".equals(type)) {
             JsonArray content = array(item.get("content"));
             if (content == null) return;

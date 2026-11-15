@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pub.hardware.*
 import app.pub.builder.BuilderModel
+import app.pub.core.ContentReport
 import app.pub.core.PhoneFilesContract
 import app.pub.projects.SavedProject
 import app.pub.ui.*
@@ -94,6 +95,7 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
     }
     LaunchedEffect(openBuildSignal) {if(openBuildSignal>0) {model.closeProject();destination="builder"}}
     var deleteTarget by remember { mutableStateOf<SavedProject?>(null) }
+    var reportTarget by remember { mutableStateOf<ReportTarget?>(null) }
     val closeProject = {
         // Closing discards the preview's photos, which an in-progress save is still copying.
         if (!model.savingPreview) {
@@ -175,7 +177,8 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                         when (destination) {
                             "launcher" -> LauncherScreen(model,
                                 onEdit = { builder.beginEdit(it); destination = "builder" },
-                                onDelete = { deleteTarget = it }) { builder.beginCreate(); destination = "builder" }
+                                onDelete = { deleteTarget = it },
+                                onReport = { reportTarget = ReportTarget.app(ContentReport.Subject.APP, it.bundle) }) { builder.beginCreate(); destination = "builder" }
                             "builder" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                                 BuilderScreen(builder, model, openSettings, { historyReturn = "builder"; historyProject = builder.editingProject?.id; historySession=builder.historySessionId; builder.refreshHistory(); destination = "history" }, onGenerate=requestBuild) { model.previewProject(it, builder.editingProject, builder.draftHistoryId) }
                             }
@@ -217,6 +220,7 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                 } },
                 dismissButton = { TextButton(onClick = model::deny) { Text("Not now") } }
             )
+            reportTarget?.let { ReportDialog(it) { reportTarget = null } }
             deleteTarget?.let { project -> AlertDialog(
                 onDismissRequest = { deleteTarget = null }, title = { Text("Delete ${project.bundle.name}?") },
                 text = { Text("This removes the app and its saved data from this phone. Files and folders you picked for it elsewhere on the phone are kept; only its access to them ends.") },

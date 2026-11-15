@@ -43,6 +43,7 @@ import app.pub.builder.BuilderModel
 import app.pub.core.AppSpec
 import app.pub.core.AppTestSuite
 import app.pub.core.ChecksReport
+import app.pub.core.ContentReport
 import app.pub.core.ProjectBundle
 import app.pub.core.ResearchBrief
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,8 @@ fun BuilderScreen(
     // The generation context includes a hardware inventory scan; build it off the main thread, then start.
     val scope=rememberCoroutineScope()
     var preparing by remember { mutableStateOf(false) }
+    var reporting by remember { mutableStateOf<ReportTarget?>(null) }
+    reporting?.let { ReportDialog(it) { reporting = null } }
     val startWithContext: ((String)->Unit)->Unit = { start ->
         focus.clearFocus();keyboard?.hide()
         if(!preparing) {
@@ -131,7 +134,7 @@ fun BuilderScreen(
     }
     BuilderStatus(builder)
 
-    builder.researchBrief?.let { ResearchCard(it) }
+    builder.researchBrief?.let { brief -> ResearchCard(brief, onReport = { reporting = ReportTarget.research(brief) }) }
     builder.researchNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     builder.uiPlan?.let { UiPlanCard(it) }
     builder.uiPlanNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -159,6 +162,7 @@ fun BuilderScreen(
                 Button(onClick = { onPreview(draft) }, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Preview app") }
                 if(builder.visualReviewError!=null) TextButton(onClick={startWithContext(builder::retryVisualReview)},enabled=builder.busy==null && !preparing) {Text("Retry visual review")}
                 TextButton(onClick = builder::clearDraft, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Discard draft") }
+                TextButton(onClick = { reporting = ReportTarget.app(ContentReport.Subject.BUILD, draft) }, modifier = Modifier.testTag("report-build")) { Text("Report content") }
             }
         }
     }
@@ -203,7 +207,7 @@ private const val RESEARCH_PREVIEW_ITEMS = 6
  * prominent links; only https links are shown, and they open outside PUB.
  */
 @Composable
-internal fun ResearchCard(brief: ResearchBrief) {
+internal fun ResearchCard(brief: ResearchBrief, onReport: (() -> Unit)? = null) {
     var expanded by rememberSaveable(brief.summary) { mutableStateOf(false) }
     val included = brief.features.filter { it.feasibleInPub && it.priority != "could" }
     val impossible = brief.features.filter { !it.feasibleInPub }
@@ -229,6 +233,7 @@ internal fun ResearchCard(brief: ResearchBrief) {
             if (longest > RESEARCH_PREVIEW_ITEMS) {
                 TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Show less" else "Show all") }
             }
+            onReport?.let { TextButton(onClick = it, modifier = Modifier.testTag("report-research")) { Text("Report research") } }
         }
     }
 }
@@ -289,8 +294,8 @@ private fun SourceLink(source: ResearchBrief.Source) {
     Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(vertical = 6.dp))
 }
 
-/** Opens a source in the user's browser app, never inside PUB; a missing browser is ignored. */
-private fun openInBrowser(context: Context, url: String) {
+/** Opens an https link in the user's browser app, never inside PUB; a missing browser is ignored. */
+internal fun openInBrowser(context: Context, url: String) {
     if (!url.startsWith("https://")) return
     runCatching {
         context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE)

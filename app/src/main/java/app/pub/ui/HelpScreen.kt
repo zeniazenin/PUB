@@ -14,8 +14,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import app.pub.BuildConfig
 import app.pub.HostModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -104,6 +106,14 @@ fun HelpScreen(host: HostModel) {
             "Hardware context describes availability, not live sensor readings, GPS coordinates, photos, recordings, Bluetooth device names, saved app data or files, including files you picked for an app. PUB does not automatically attach unique device identifiers. Anything you type or dictate into the description is included when you generate.",
             "Before generating, PUB sends a separate research request with only your description (and, for edits, the app's name, description and saved research). With web search, OpenAI performs the searches; the sources it used are shown in the builder. When you edit an app, generation also receives the current app code and the app’s original request and saved behavior checks.",
             "Connecting ChatGPT and loading models also require internet access. Disconnecting your ChatGPT account stops using that connection for building; saved apps still run locally.")
+        val context = LocalContext.current
+        TextButton(onClick = { openInBrowser(context, BuildConfig.PRIVACY_POLICY_URL) }, modifier = Modifier.testTag("help-privacy-policy")) {
+            Text("Read the privacy policy")
+        }
+        HorizontalDivider()
+        HelpSection("Reporting content",
+            "If a build, its research or a saved app shows something offensive, sexual, dangerous or misleading, report it from inside PUB: Report content on the build result, Report research on the Research card, or long-press an app icon and choose Report app.",
+            "Choose a reason, add details if you like, and choose whether to include the app’s name, description and code, or the research summary and sources. Reports go to PUB’s developer, not to OpenAI, and never include your phone details, account, saved data, files or photos.")
         HelpSection("Current limits",
             "Generated apps cannot use general internet requests, Wi-Fi controls, files you have not picked for them, notifications, scheduled tasks, background services, raw health data or biometrics. Camera and accessory support is limited to the features described above; hardware presence does not guarantee protocol support.",
             "Generated apps use PUB’s supported controls and capabilities. Test their behavior, calculations and accessory commands before relying on them. An unsent description may be lost if Android closes PUB; build drafts are kept until you save or discard them.")

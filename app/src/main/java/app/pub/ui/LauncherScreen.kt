@@ -41,7 +41,7 @@ fun LauncherBrand(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (SavedProject) -> Unit, onCreate: () -> Unit) {
+fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (SavedProject) -> Unit, onReport: (SavedProject) -> Unit, onCreate: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Your apps", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
@@ -55,7 +55,7 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
             verticalArrangement = Arrangement.spacedBy(26.dp)
         ) {
             items(host.projects, key = { it.id }) { project ->
-                LauncherTile(project.id, project.bundle.name, graphic = project.bundle.icon?.let { project.bundle.assets[it]?.asJsonObject }, onEdit = { onEdit(project) }, onDelete = { onDelete(project) }) { host.openProject(project) }
+                LauncherTile(project.id, project.bundle.name, graphic = project.bundle.icon?.let { project.bundle.assets[it]?.asJsonObject }, onEdit = { onEdit(project) }, onDelete = { onDelete(project) }, onReport = { onReport(project) }) { host.openProject(project) }
             }
         }
         Button(
@@ -67,12 +67,12 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LauncherTile(id: String, name: String, graphic: com.google.gson.JsonObject? = null, onEdit: () -> Unit, onDelete: () -> Unit, onOpen: () -> Unit) {
+private fun LauncherTile(id: String, name: String, graphic: com.google.gson.JsonObject? = null, onEdit: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onOpen: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     Box {
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-            .combinedClickable(role = Role.Button, onClickLabel = "Open $name", onLongClickLabel = "Edit or delete $name", onLongClick = { menuOpen = true }, onClick = onOpen)
+            .combinedClickable(role = Role.Button, onClickLabel = "Open $name", onLongClickLabel = "Edit, delete or report $name", onLongClick = { menuOpen = true }, onClick = onOpen)
             .testTag("app-$id").padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -84,6 +84,7 @@ private fun LauncherTile(id: String, name: String, graphic: com.google.gson.Json
     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
         DropdownMenuItem(text = { Text("Edit app") }, modifier = Modifier.testTag("edit-app-$id"), onClick = { menuOpen = false; onEdit() })
         DropdownMenuItem(text = { Text("Delete app") }, modifier = Modifier.testTag("delete-app-$id"), onClick = { menuOpen = false; onDelete() })
+        DropdownMenuItem(text = { Text("Report app") }, modifier = Modifier.testTag("report-app-$id"), onClick = { menuOpen = false; onReport() })
     }
     }
 }

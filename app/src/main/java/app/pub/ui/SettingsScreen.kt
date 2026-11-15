@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.pub.BuildConfig
 import app.pub.HostModel
 import app.pub.builder.BuilderModel
 import app.pub.core.PermissionPolicy.Rule
@@ -40,6 +41,9 @@ fun SettingsScreen(
     ) {
         OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth().testTag("help-guide")) {
             Text("Help & guide")
+        }
+        OutlinedButton(onClick = { openInBrowser(context, BuildConfig.PRIVACY_POLICY_URL) }, modifier = Modifier.fillMaxWidth().testTag("privacy-policy")) {
+            Text("Privacy policy")
         }
         OutlinedButton(onClick = onInventory, modifier = Modifier.fillMaxWidth().testTag("hardware-inventory")) {Text("Hardware inventory")}
         OutlinedButton(onClick = onHardwareCheck, modifier = Modifier.fillMaxWidth().testTag("hardware-check")) {Text("Hardware check")}

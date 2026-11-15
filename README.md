@@ -34,10 +34,12 @@ No API key is used. ChatGPT authorization/plan eligibility and available models 
 - Photos are private JPEG assets scoped to the host project identity: full captured resolution, remembered JPEG quality, maximum 20 photos / 1 GiB per project, 256 MiB each. Saving streams the JPEG without resizing or recompressing; only display previews are sampled. Personal metadata is removed, with orientation and color profiles retained. Previews are temporary; save copies their assets, close removes them, and startup removes abandoned temporary captures.
 - ChatGPT tokens are encrypted using AES-GCM with a non-exportable Android Keystore key, atomically stored in the host's no-backup directory. Tokens never enter prompts, projects, script events, logs, or source control.
 - Disconnect revokes the renewable session and clears local tokens. If remote revocation fails, PUB reports it and directs the user to ChatGPT Settings. Saved apps are retained.
+- Content reports (Google Play's AI-Generated Content policy): **Report content** on a build result, **Report research** on the Research card and **Report app** in a launcher tile's long-press menu open an in-app form. It has a reason, optional details, and an **Include** option, checked by default, that attaches the app's name, description and code (up to 40,000 characters) or the research summary and sources. The report is sent to the developer's endpoint (`tools/report-endpoint`, a Google Apps Script web app that stores reports in a Google Sheet), never to OpenAI. It never contains phone context, account details, saved data, files or photos (`core/ContentReport`). Builds without an endpoint show that reporting isn't set up.
+- Settings and Help & guide link to the privacy policy (`docs/privacy-policy.md` by default; see "Release builds").
 
 ## Build and test
 
-Requirements: JDK 17, Android SDK 35/build-tools 35.0.0. Android 12/API 31 minimum. Gradle 8.11.1, AGP 8.9.2, Kotlin 2.1.20. On this prepared machine:
+Requirements: JDK 17, Android SDK 36/build-tools 36.0.0. PUB targets Android 16 (API 36), as Google Play requires for new apps and updates since August 31, 2026, with Android 12 (API 31) as the minimum. Gradle 8.11.1, AGP 8.10.1, Kotlin 2.1.20. On this prepared machine:
 
 ```powershell
 .\tools\dev.ps1 :core:test :app:assembleDebug :app:lintDebug
@@ -48,7 +50,7 @@ With your own Android toolchain, use `gradlew.bat` and set `JAVA_HOME`, `ANDROID
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
-Debug builds are unoptimized and debuggable, so they are not representative of performance. To check speed on a phone, build the R8-optimized `benchmark` variant (signed with the local debug key; never publish it): `.\tools\dev.ps1 :app:assembleBenchmark`, then install `app/build/outputs/apk/benchmark/app-benchmark.apk`. `release` is optimized the same way but needs your own signing configuration.
+Debug builds are unoptimized and debuggable, so they are not representative of performance. To check speed on a phone, build the R8-optimized `benchmark` variant (signed with the local debug key; never publish it): `.\tools\dev.ps1 :app:assembleBenchmark`, then install `app/build/outputs/apk/benchmark/app-benchmark.apk`. `release` is optimized the same way and is signed with your upload key (see "Release builds").
 
 ```powershell
 .\.toolchain\android-sdk\platform-tools\adb.exe install -r app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk
@@ -56,6 +58,27 @@ Debug builds are unoptimized and debuggable, so they are not representative of p
 ```
 
 Unlock the phone and keep PUB foreground for microphone instrumentation. Default tests use synthetic local project fixtures; microphone tests save a tuner fixture app from the test APK (`app/src/androidTest/assets/fixtures/tuner`) and remove it afterwards. Explicitly opted-in live ChatGPT tests use the connected account and submit generation/review requests. The credential-storage test uses a separate test file. See `docs/chatgpt-builder.md` for the protocol and validation status; `docs/architecture.md` describes the original runtime proof.
+
+## Release builds
+
+Google Play needs a signed App Bundle (`.aab`). `bundleRelease` and `assembleRelease` refuse to run until they have an upload key and a report endpoint. This keeps an unsigned bundle, or one whose Report content form can't send, from ever reaching Play. The settings are Gradle properties or environment variables, and none of them belong in Git:
+
+| Gradle property | Environment variable | Value |
+|---|---|---|
+| `pub.upload.storeFile` | `PUB_UPLOAD_STORE_FILE` | Path to your upload keystore, kept outside the repository (for example `C:/Users/you/keys/pub-upload.jks`) |
+| `pub.upload.storePassword` | `PUB_UPLOAD_STORE_PASSWORD` | Keystore password |
+| `pub.upload.keyAlias` | `PUB_UPLOAD_KEY_ALIAS` | Key alias. Defaults to `upload`. |
+| `pub.upload.keyPassword` | `PUB_UPLOAD_KEY_PASSWORD` | Key password. Defaults to the keystore password, as keytool's PKCS12 keystores use. |
+| `pub.reportEndpoint` | `PUB_REPORT_ENDPOINT` | The `https://…/exec` URL of your deployed report endpoint (`tools/report-endpoint/README.md`) |
+| `pub.privacyPolicyUrl` | `PUB_PRIVACY_POLICY_URL` | Optional. Defaults to `https://github.com/zeniazenin/PUB/blob/main/docs/privacy-policy.md`, which works once that file is pushed. |
+
+`tools\dev.ps1` uses `.toolchain\gradle-home` as Gradle's user home, so the simplest place for the properties is `.toolchain\gradle-home\gradle.properties`, which Git ignores. Write paths with forward slashes, because a properties file treats `\` as an escape character. Then:
+
+```powershell
+.\tools\dev.ps1 :core:test :app:lintRelease :app:bundleRelease
+```
+
+The bundle is `app\build\outputs\bundle\release\app-release.aab`. Create the upload key and publish the app as described in `docs/google-play-release.md`.
 
 ## Layout
 
@@ -66,6 +89,7 @@ Unlock the phone and keep PUB foreground for microphone instrumentation. Default
 - `app/runtime`: isolated service and bounded Binder protocol.
 - `app/hardware`: capability broker, native adapters, camera/media storage, files on the phone (system picker, grants, document access) and Hardware check.
 - `app/permissions`, `app/audio`, `app/ui`: native broker, microphone processing, Compose renderer.
+- `app/reports`, `app/ui/ReportDialog.kt`, `core/ContentReport`: the in-app content report form and its sender. `tools/report-endpoint`: the Apps Script endpoint that receives reports.
 - `app/assets/samples/tip-calculator.json`: the sample app package. On first launch, a library without any saved app gets one copy as an ordinary app with a new ID (`app/projects/SampleApps.kt`); the host preference `samples.seeded` keeps it from being added again.
 
 ## Remaining limits

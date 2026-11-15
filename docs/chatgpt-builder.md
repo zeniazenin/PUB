@@ -2,9 +2,7 @@
 
 ## Reference and protocol
 
-The user requested ChatGPT account login instead of an API key and identified their installed Roundlight app. `com.roundlight.app` was copied from the connected phone as an APK only; its private account data was not read. The REA plugin lacked configured ADB/JADX providers. Local SDK `dexdump` of `classes4.dex` showed Roundlight's `ChatGptAuth` constructing a loopback listener, random state/nonce/verifier, S256 challenge, `dynamic_agent_client`, stable host identifier, `agent_name_hint=Roundlight`, and direct ChatGPT plan scopes. Its package also contains the public models/Responses endpoint strings. These are static code observations, not a claim to have observed a Roundlight login at runtime.
-
-PUB independently implements the same documented public-client pattern under `agent_name_hint=PUB`:
+The user requested ChatGPT account login instead of an API key. PUB implements OpenAI's documented "Sign in with ChatGPT" public-client pattern (see the official references below) under `agent_name_hint=PUB`:
 
 - Authorization: `https://auth.openai.com/api/accounts/authorize`.
 - Resource: `https://api.openai.com/v1`.

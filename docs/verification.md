@@ -9,7 +9,7 @@ Verified November 4, 2026, on Samsung SM-S948U, Android 17/API 37.
 - Android lint: **0 errors, 19 warnings** (dependency updates, icon/resource conventions and optional Kotlin style).
 - **4 physical-device tests pass**: isolated JavaScript Binder session; generated-app preview/interaction/save/reopen/delete with separate permission identities and denied INTERNET permission for the isolated UID; Android Keystore encrypted credential roundtrip in a dedicated dummy test file; real microphone capture, global revocation, and foreground/background lifecycle behavior.
 - The initial encrypted-storage test attempted to use the instrumentation package's directory while running under the target UID. The fixture now uses a separate file in the target context. It never reads or overwrites a real account session.
-- PUB 0.2.0 is installed on the connected phone. Account credentials were not taken from Roundlight, Codex, or the environment.
+- PUB 0.2.0 is installed on the connected phone. Account credentials were not taken from other apps, tools or the environment.
 
 ## Prior tuner milestone evidence
 

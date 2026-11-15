@@ -26,7 +26,7 @@ public class HardwareContractTest {
     }
 
     @Test public void projectCanDeclareEverySupportedHardwareCapability() {
-        Set<String> expected = Set.of("camera", "location", "sensors", "bluetooth", "haptics", "torch", "audio", "battery", "infrared", "nfc", "usb", "microphone.pitch", "storage.project");
+        Set<String> expected = Set.of("camera", "location", "sensors", "bluetooth", "haptics", "torch", "audio", "battery", "infrared", "nfc", "usb", "files", "microphone.pitch", "storage.project");
         JsonObject bundle = new JsonObject();
         bundle.addProperty("name", "Hardware workshop");
         bundle.addProperty("description", "Only declared, brokered hardware access");
@@ -42,7 +42,7 @@ public class HardwareContractTest {
             Map.entry("camera", "list"), Map.entry("location", "stop"), Map.entry("sensors", "list"),
             Map.entry("bluetooth", "choose"), Map.entry("haptics", "stop"), Map.entry("torch", "set"),
             Map.entry("audio", "stop"), Map.entry("battery", "get"), Map.entry("infrared", "frequencies"),
-            Map.entry("nfc", "read"), Map.entry("usb", "choose")
+            Map.entry("nfc", "read"), Map.entry("usb", "choose"), Map.entry("files", "grants")
         );
         examples.forEach((capability, operation) -> {
             JsonObject command = request(capability, operation);

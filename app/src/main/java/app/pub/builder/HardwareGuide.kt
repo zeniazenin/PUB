@@ -4,13 +4,13 @@ package app.pub.builder
 object HardwareGuide {
     val CONTRACT = """
         Hardware access is optional and foreground-only. Declare only the capability groups your app uses:
-        camera, location, sensors, bluetooth, haptics, torch, audio, battery, infrared, nfc, usb.
+        camera, location, sensors, bluetooth, haptics, torch, audio, battery, infrared, nfc, usb, and files (documents the user picks on the phone; see the files guide).
         Check device.hardware availability from the provided generation context. Missing hardware, denied permissions,
         cancellation, disconnects and Android settings must produce honest recoverable UI, never fabricated readings.
         Emit {type:'hardware.request',id:'short_unique_request_id',capability:'group',operation:'operation',args:{...}}.
         id must use only letters/digits/_/- and be <=64 characters. One new permission request at a time.
         Begin access from an action event caused by a user button. Native host owns permissions and device selection.
-        choose, capture, route and NFC reading always require an explicit button action; never run them from init or callbacks.
+        choose, capture, route, NFC reading and the file picker always require an explicit button action; never run them from init or callbacks.
         After permission and device selection, data operations may follow result events. Do not loop requests on errors.
         Responses: {type:'hardware',id,capability,event,data}. Stream events reuse the initiating id.
         Handle error/cancelled and {type:'hardwareStopped'} by clearing active indicators and providing a Start button.
@@ -18,7 +18,7 @@ object HardwareGuide {
         Photos and readings stay local unless the user explicitly puts them in an app description. No network APIs are exposed.
 
         camera: list {} returns public camera/lens routes and supported settings metadata (possibly compacted); capture {} opens native preview with user-selected logical/physical lens and supported resolution, JPEG quality, zoom, flash, exposure, focus and white-balance controls. Android may reject lens/resolution combinations. Do not promise manufacturer-only modes. Scripts cannot silently choose capture settings.
-        photo event data {asset:'UUID.jpg',width,height,lensFacing,jpegQuality}; retain asset in storage.project to reopen it later.
+        photo event data {asset:'UUID.jpg',width,height,lensFacing,jpegQuality}; retain asset in storage.project to reopen it later, or with storage.files list the photos folder to find every photo again (private files guide).
         Display {type:'image',asset:asset,description:'photo description <=200 chars'}. Only this app's captured JPEG assets can be shown. Maximum4 image nodes per screen.
         No arbitrary paths, URLs, camera stream frames, video, OCR or visual AI are supported. Photos preserve captured pixel resolution; native quality choices70/85/95/100 control JPEG compression (default95, remembered). Quota20 photos/1GiB per app,256MiB per photo. Display previews are sampled; originals are not. Respect exact dimensions returned by capture; do not promise sensor maximums hidden by Android.
 

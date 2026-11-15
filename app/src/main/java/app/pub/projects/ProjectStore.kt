@@ -15,6 +15,11 @@ class ProjectStore(context: Context) {
     }.sortedBy { it.bundle.name.lowercase() }
     /** True when the library holds no package file at all, readable or not (an AtomicFile backup counts). */
     fun isEmpty(): Boolean = root.listFiles().orEmpty().none { it.name.endsWith(".json") || it.name.endsWith(".json.bak") }
+    /** True when a package file exists for [id], readable or not (an AtomicFile backup counts). */
+    fun contains(id: String): Boolean {
+        require(isAppId(id))
+        return File(root, "$id.json").exists() || File(root, "$id.json.bak").exists()
+    }
     /** Saves a new app. New apps always get a fresh UUID; [LEGACY_TUNER_ID] is never assigned. */
     fun save(bundle: ProjectBundle): SavedProject {
         val id = UUID.randomUUID().toString()

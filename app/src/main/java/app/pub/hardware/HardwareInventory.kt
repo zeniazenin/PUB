@@ -27,7 +27,9 @@ object HardwareInventory {
     const val DESCRIPTION_MAX_BYTES = 15 * 1024
     val labels = linkedMapOf("camera" to "Cameras", "bluetooth" to "Bluetooth devices", "location" to "Location (GPS)",
         "sensors" to "Motion & environment sensors", "audio" to "Audio & headphones", "haptics" to "Vibration",
-        "torch" to "Flashlight", "battery" to "Battery status", "nfc" to "NFC tags", "usb" to "USB devices", "infrared" to "Infrared transmitter")
+        "torch" to "Flashlight", "battery" to "Battery status", "nfc" to "NFC tags", "usb" to "USB devices", "infrared" to "Infrared transmitter",
+        // Not hardware, but brokered and ruled the same way: documents the user picks in the system file picker.
+        "files" to "Files on this phone")
     private val sensorTypes = linkedMapOf(
         "accelerometer" to Sensor.TYPE_ACCELEROMETER, "accelerometer_uncalibrated" to Sensor.TYPE_ACCELEROMETER_UNCALIBRATED,
         "gyroscope" to Sensor.TYPE_GYROSCOPE, "gyroscope_uncalibrated" to Sensor.TYPE_GYROSCOPE_UNCALIBRATED,

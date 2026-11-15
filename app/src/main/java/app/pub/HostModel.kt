@@ -16,9 +16,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.pub.core.PermissionPolicy.Rule
 import app.pub.hardware.*
+import app.pub.core.FilesContract
 import app.pub.core.HardwareContract
+import app.pub.core.PhoneFilesContract
 import app.pub.core.UiPacket
 import app.pub.core.ProjectBundle
+import app.pub.projects.AppFiles
 import app.pub.projects.AppSpecStore
 import app.pub.projects.ProjectStore
 import app.pub.projects.SampleApps
@@ -75,6 +78,53 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     private var previewData = JsonObject()
     private var hardwareIntent = false
     private val media = ProjectMedia(context)
+    // Private files of the open app (storage.files). Like hardware, a session belongs to one runtime start and epoch.
+    private val files = AppFiles(context, media)
+    private var filesSession: AppFiles.Session? = null
+    private var filesEpoch = 0L
+    /** Ends the open app's file session: its queued requests are skipped and late replies dropped. */
+    private fun stopFiles() { filesEpoch++; filesSession?.close(); filesSession = null }
+    private fun currentFilesSession(): AppFiles.Session = filesSession ?: run {
+        val epoch = filesEpoch
+        // An edit preview has its own snapshot folder and photos, and sees the saved app's photos read-only.
+        val scope = AppFiles.Scope(projectId, projectId, if (preview) previewEditTarget?.id else null)
+        files.open(scope) { reply -> if (filesEpoch == epoch) runtime?.send(reply) }.also { filesSession = it }
+    }
+    // Files on the phone (capability files): documents the user picks in the system picker, through the hardware broker.
+    // Saved apps keep their grants; previews hold session grants, and an edit preview reads the saved app's read-only.
+    private val phoneFiles = PhoneFiles.create(context, files)
+    /** The system file picker the open app asked for; MainActivity launches it and answers [filePickerResult]. */
+    var filePicker by mutableStateOf<FilePick?>(null); private set
+    // The app session (files epoch) that asked: only it gets the answer.
+    private var filePickerSession = -1L
+    /** Changes whenever an app's file grants may have changed (for Settings → Access). */
+    var fileGrantsRevision by mutableStateOf(0); private set
+    private fun phoneFileScope(): PhoneFiles.Scope {
+        val saved = if (preview) previewEditTarget?.id else null
+        return PhoneFiles.Scope(projectId, saved, if (FilesContract.CAPABILITY in capabilities) AppFiles.Scope(projectId, projectId, saved) else null)
+    }
+    /**
+     * The system file picker's answer from MainActivity: [uris] is null or empty when the user cancelled, and [failed]
+     * says no picker could open. It reaches only the app session that asked, if file access is still allowed.
+     */
+    fun filePickerResult(uris: List<android.net.Uri>?, failed: Boolean = false) {
+        val pick = filePicker ?: return
+        filePicker = null
+        if (!projectOpen || !visible || filePickerSession != filesEpoch) return
+        hardwareBroker().completePick(pick, uris, failed)
+        fileGrantsRevision++
+    }
+    /** Files and folders the saved app [id] can open (Settings → Access). Reads the grant store off the main thread. */
+    suspend fun fileGrantCount(id: String): Int { requireProjectId(id); return withContext(Dispatchers.IO) { phoneFiles.store.grants(id).size } }
+    /**
+     * Settings → Access → Forget file access: releases every file and folder the saved app [id] was given and deletes its
+     * grant file. The documents themselves are never touched; the app can ask the user to pick them again.
+     */
+    fun forgetFileAccess(id: String) {
+        requireProjectId(id)
+        if (projectId == id || previewEditTarget?.id == id) stopHardware()
+        phoneFiles.later({ phoneFiles.store.forget(id) }) { fileGrantsRevision++ }
+    }
     private var hardware: HardwareBroker? = null
     var hardwarePrompt by mutableStateOf<HardwarePrompt?>(null); private set
     var hardwareAndroidRequest by mutableStateOf<Array<String>?>(null)
@@ -96,11 +146,24 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     fun changeHardwareBlock(cap: String,value: Boolean) { require(cap in HardwareContract.OPERATIONS);permissionPrefs.edit().putBoolean("$cap.blocked",value).apply();stopHardware();hardwareRevision++ }
     fun changeHardwareDefault(cap: String,value: Rule) { require(cap in HardwareContract.OPERATIONS && value in setOf(Rule.ASK,Rule.ALLOW));permissionPrefs.edit().putString("$cap.default",value.name).apply();stopHardware();hardwareRevision++ }
     fun changeHardwareRule(id: String,cap: String,value: Rule) { requireProjectId(id);require(cap in HardwareContract.OPERATIONS);permissionPrefs.edit().putString("$id.$cap",value.name).apply();stopHardware();hardwareRevision++ }
-    fun stopHardware() { hardwareEpoch++;hardware?.close();hardware=null;hardwarePrompt=null;hardwareAndroidRequest=null;devicePicker=null;cameraRequest=null;nfcRequest=null;hardwareRevision++;broker.stop();runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped")) }
+    fun stopHardware() = endHardware(keepFilePicker = false)
+    /**
+     * Ends hardware sessions and invalidates their pending results. With [keepFilePicker], a system file picker that is
+     * already open survives: PUB was left for it, and its answer still belongs to the open app's request.
+     */
+    private fun endHardware(keepFilePicker: Boolean) {
+        if (!keepFilePicker || filePicker?.launched != true) filePicker = null
+        hardwareEpoch++;hardware?.close();hardware=null;hardwarePrompt=null;hardwareAndroidRequest=null;devicePicker=null;cameraRequest=null;nfcRequest=null;hardwareRevision++;broker.stop();runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped"))
+    }
+    /** True while the only active access is to files on the phone (the host shows "Phone file access" instead of devices). */
+    val onlyFileAccessActive: Boolean get() { hardwareRevision; return hardware?.activeCapabilities == setOf(PhoneFilesContract.CAPABILITY) }
     private fun hardwareBroker(): HardwareBroker {
         if(hardware?.isClosed==true) {hardware=null;hardwareEpoch++}
         return hardware ?: run {
             val epoch=hardwareEpoch
+            val fileAccess=FileAccess(phoneFiles,phoneFileScope()) { pick ->
+                if(hardwareEpoch==epoch && filePicker==null) { filePicker=pick; filePickerSession=filesEpoch; true } else false
+            }
             HardwareBroker(context,projectId,preview,capabilities,{ visible && projectOpen && hardwareEpoch==epoch },
                 {if(hardwareEpoch==epoch) hardwarePrompt=it},{if(hardwareEpoch==epoch) hardwareAndroidRequest=it},{if(hardwareEpoch==epoch) devicePicker=it},
                 {callback->if(hardwareEpoch==epoch) cameraRequest=callback},{callback->if(hardwareEpoch==epoch) nfcRequest=callback},
@@ -108,7 +171,8 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                 // script is busy, so concurrent streams all get delivered and none can exhaust the event queue.
                 {packet,disposable->if(hardwareEpoch==epoch) { if(packet["event"]?.asString=="audio.routeLost") broker.stop("Audio route disconnected")
                     runtime?.send(packet,key=if(disposable) "$HARDWARE_STREAM${packet["id"].asString}:${packet["event"].asString}" else null) }},
-                {if(hardware?.isClosed==true) {broker.stop("Hardware access ended");runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped"))};hardwareRevision++}).also {hardware=it}
+                {if(hardware?.isClosed==true) {broker.stop("Hardware access ended");runtime?.discard(HARDWARE_STREAM);runtime?.send(event("hardwareStopped"))};hardwareRevision++},
+                fileAccess).also {hardware=it}
         }
     }
     var ui by mutableStateOf<JsonObject?>(null)
@@ -167,7 +231,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
             }, disposable = true)
         })
 
-    init { runCatching {media.cleanupTemporary()};syncPolicies();refreshProjects() }
+    init { runCatching {media.cleanupTemporary()};files.cleanupAtStartup { store.contains(it) };phoneFiles.cleanupAtStartup { store.contains(it) };syncPolicies();refreshProjects() }
     fun openProject(project: SavedProject) {
         requireProjectId(project.id)
         closeProject()
@@ -182,7 +246,15 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     }
     fun closeProject() {
         stopHardware()
-        if(preview && projectId.isNotBlank()) media.delete(projectId)
+        stopFiles()
+        if(preview && projectId.isNotBlank()) {
+            media.delete(projectId)
+            // Queued after the preview's own requests; a saved new app's files were already moved out.
+            val previewId = projectId
+            files.later { files.delete(previewId) }
+            // Preview file grants are session-only, also when the preview was just saved as an app.
+            phoneFiles.later({ phoneFiles.store.forget(previewId) })
+        }
         runtime?.close(); runtime = null
         capabilities = emptySet()
         broker.projectChanged()
@@ -209,14 +281,18 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         previewData = if (editing == null) JsonObject() else runCatching {
             JsonParser.parseString(context.getSharedPreferences("project.${editing.id}", Context.MODE_PRIVATE).getString("data", "{}")).asJsonObject
         }.getOrDefault(JsonObject())
+        // An edit preview starts from a copy of the saved app's files, queued before any of its requests.
+        if (editing != null) { val previewId = projectId; files.later { files.snapshot(editing.id, previewId) } }
         projectOpen = true
         broker.setForeground(visible)
         syncPolicies(); restart()
     }
     /**
-     * Saves the open preview. Writing the package, its data and a photo set (up to 1 GiB) runs off the
-     * main thread; the saved app then reopens and [onSaved] receives the preview's history ID and the
-     * saved project. [savingPreview] is true meanwhile, so the preview cannot be saved twice or closed.
+     * Saves the open preview. Writing the package, its data, a photo set (up to 1 GiB) and the preview's
+     * files runs off the main thread; the saved app then reopens and [onSaved] receives the preview's history
+     * ID and the saved project. [savingPreview] is true meanwhile, so the preview cannot be saved twice or
+     * closed, and its new file requests are answered busy. An edit keeps the saved app's data, photos and
+     * files; the edit preview's changes to them are discarded.
      */
     fun savePreview(onSaved: (historyId: String?, saved: SavedProject) -> Unit = { _, _ -> }) {
         if (!preview || ui == null || failure != null || savingPreview) return
@@ -234,10 +310,13 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                     try {
                         check(context.getSharedPreferences("project.${created.id}", Context.MODE_PRIVATE).edit().putString("data",data).commit())
                         media.copyPreview(previewId,created.id)
+                        // Last, after the preview's queued file requests: all its files move to the new app or none do.
+                        files.serial { files.publishPreview(previewId,created.id) }
                     } catch(e: Exception) {
                         runCatching {store.delete(created.id)}
                         context.deleteSharedPreferences("project.${created.id}")
                         runCatching {media.delete(created.id)}
+                        runCatching {files.serial { files.delete(created.id) }}
                         throw e
                     }
                     created
@@ -260,6 +339,10 @@ class HostModel(application: Application) : AndroidViewModel(application) {
             // The app's stored research and checks go with it.
             specs.delete(project.id)
             media.delete(project.id)
+            // Queued after any request still running for it; startup cleanup removes the folder if this is cut short.
+            files.later { files.delete(project.id) }
+            // Its access to files on the phone ends (permissions no other app holds are released); the documents stay.
+            phoneFiles.later({ phoneFiles.store.forget(project.id) }) { fileGrantsRevision++ }
             permissionPrefs.edit().apply { HardwareContract.OPERATIONS.keys.forEach {remove("${project.id}.$it")} }.apply()
             context.deleteSharedPreferences("project.${project.id}")
             context.getSharedPreferences("permissions", Context.MODE_PRIVATE).edit().remove("${project.id}.microphone").apply()
@@ -272,6 +355,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     fun restart() {
         if (!projectOpen) return
         stopHardware()
+        stopFiles()
         runtime?.close()
         runtime = null
         broker.projectChanged()
@@ -328,6 +412,11 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                     if (preview) previewData = data.deepCopy()
                     else projectPrefs.edit().putString("data", data.toString()).apply()
                 }
+                // No gesture or prompt: the folder is the app's own. The reply arrives later as a files event.
+                FilesContract.EFFECT -> {
+                    require(FilesContract.CAPABILITY in capabilities) { "Files capability was not declared" }
+                    currentFilesSession().request(effect, busy = if (savingPreview) "PUB is saving this app. Try again after it reopens." else null)
+                }
             }
         }
     }
@@ -337,7 +426,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     fun setVisible(value: Boolean) {
         visible = value
         broker.setForeground(value && projectOpen)
-        if (!value) { stopHardware();askPermission = false; askAndroidPermission = false }
+        if (!value) { endHardware(keepFilePicker = true);askPermission = false; askAndroidPermission = false }
     }
     fun stop() = broker.stop()
     fun allowSession() { val requested = askPermission; askPermission = false; if (requested && visible && projectOpen) broker.allowOnce() }
@@ -436,6 +525,6 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         addProperty("cloudConnection", false)
     }
     private fun event(type: String) = JsonObject().apply { addProperty("type", type) }
-    override fun onCleared() { hardware?.close();runtime?.close(); broker.close(); super.onCleared() }
+    override fun onCleared() { hardware?.close();stopFiles();runtime?.close(); broker.close(); super.onCleared() }
     private companion object { const val HARDWARE_STREAM = "hardware:" }
 }

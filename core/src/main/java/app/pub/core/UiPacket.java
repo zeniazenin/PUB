@@ -9,7 +9,7 @@ public final class UiPacket {
     public final JsonArray effects;
     private static final Set<String> TYPES = Set.of("column", "text", "meter", "choices", "button", "input", "image", "graphic");
     private static final Set<String> GRAPHIC_FIELDS = Set.of("type", "asset", "description", "highlight");
-    private static final Set<String> EFFECTS = Set.of("microphone.start", "microphone.stop", "storage.save", "hardware.request");
+    private static final Set<String> EFFECTS = Set.of("microphone.start", "microphone.stop", "storage.save", "hardware.request", FilesContract.EFFECT);
     private UiPacket(JsonObject ui, JsonArray effects) { this.ui = ui; this.effects = effects; }
     public static UiPacket parse(String input) {
         if (input.length() > ScriptEngine.MAX_MESSAGE) throw new IllegalArgumentException("Packet too large");
@@ -23,6 +23,7 @@ public final class UiPacket {
             JsonObject effect = item.getAsJsonObject();
             if (!EFFECTS.contains(effect.get("type").getAsString())) throw new IllegalArgumentException("Unknown effect");
             if ("hardware.request".equals(effect.get("type").getAsString())) HardwareContract.validate(effect);
+            if (FilesContract.EFFECT.equals(effect.get("type").getAsString())) FilesContract.validate(effect);
         }
         return new UiPacket(ui, effects);
     }

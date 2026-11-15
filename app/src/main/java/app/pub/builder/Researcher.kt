@@ -3,6 +3,7 @@ package app.pub.builder
 import app.pub.auth.ChatGptAuth
 import app.pub.auth.ToolUnavailableException
 import app.pub.core.HardwareContract
+import app.pub.core.PhoneFilesContract
 import app.pub.core.ProjectBundle
 import app.pub.core.ResearchBrief
 import com.google.gson.JsonObject
@@ -64,16 +65,23 @@ class Researcher(private val auth: ChatGptAuth) {
             val limits = environment.getAsJsonObject("limits")
             val pitch = environment.getAsJsonObject("microphonePitch")
             val components = environment.getAsJsonArray("uiComponents").joinToString(", ") { it.asString }
-            val hardware = HardwareContract.OPERATIONS.keys.sorted().joinToString("; ") { HARDWARE[it] ?: it }
+            // Phone files are a brokered capability but not hardware; FILE_ACCESS_LIMITS describes them.
+            val hardware = HardwareContract.OPERATIONS.keys.filter { it != PhoneFilesContract.CAPABILITY }.sorted().joinToString("; ") { HARDWARE[it] ?: it }
             return """
                 - One offline mini-app: synchronous JavaScript behind a native Material 3 screen built only from these components: $components. input is a single text field (numbers are typed as text); choices is up to 8 selectable options; meter is a -50..+50 tuning needle; image shows a photo the app captured; graphic is a native vector drawing (charts and diagrams must be drawn from shapes) or a static generated picture.
                 - At most ${limits["uiNodes"].asInt} UI nodes on screen, nesting depth ${limits["uiNestingDepth"].asInt}, in one vertically scrolling column. The host owns fonts, colours, theme and font scaling; no custom styles, layouts, gestures or animation.
-                - The screen changes only after a user action or a hardware event, each handled within ${limits["executionBudgetMsPerLoadOrDispatch"].asInt} ms. No timers or self-updating clocks, countdowns, alarms, reminders, notifications, background work, widgets or scheduled tasks; the app runs only while open. The current date and time can be read when an event happens.
+                - The screen changes only after a user action, a hardware event or a file reply, each handled within ${limits["executionBudgetMsPerLoadOrDispatch"].asInt} ms. No timers or self-updating clocks, countdowns, alarms, reminders, notifications, background work, widgets or scheduled tasks; the app runs only while open. The current date and time can be read when an event happens.
                 - No network: no internet, accounts, sync, sharing, cloud backup, ads, AI, maps or live data such as prices, rates or weather. Reference data must be built into the app.
-                - Storage: one private JSON value per app, at most ${limits["projectStorageJsonCharacters"].asInt} characters. No files, export/import, clipboard, contacts, calendar or other apps' data.
+                - Storage: one private JSON value per app, at most ${limits["projectStorageJsonCharacters"].asInt} characters, and a private file folder per app (at most ${limits["appFilesBytes"].asLong / (1024 * 1024)} MiB and ${limits["appFilesEntries"].asInt} files and folders) that the app can list, read, write, organize into folders, move, copy and delete, in pieces of ${limits["fileChunkBytes"].asInt} bytes per step; it also lists the app's own camera photos, so a photo app finds its pictures again in a later session. $FILE_ACCESS_LIMITS No clipboard, contacts or calendar.
                 - Optional foreground hardware, each use started by a user tap, permission-gated and only where the phone has it: $hardware; microphone pitch estimates (${pitch["minimumHz"].asInt}-${pitch["maximumHz"].asInt} Hz only, no recording or speech recognition).
             """.trimIndent()
         }
+
+        /**
+         * The single statement of what apps can reach beyond their private folder (storage.files): files and folders the
+         * user picks in Android's system file picker (capability files), and nothing else.
+         */
+        private val FILE_ACCESS_LIMITS = "With the user's permission, apps can also open, save and organize files on the phone that the user picks in Android's file picker, from a button: single files, several files (up to ${PhoneFilesContract.MAX_PICK}), a folder (list, read, write, create, rename and delete inside it), or a new document the user names and places (Save as). This includes Downloads, shared storage and apps that offer documents such as Drive. A saved app keeps access to what was picked (up to ${PhoneFilesContract.MAX_GRANTS} files and folders) until the user removes it, and can import picked files into its private folder or export its files to them. Apps never see anything the user did not pick: no browsing or searching the phone, no silent access to shared storage, photos or Downloads, no other apps' private data and no sharing to other apps; online-only documents such as Google Docs files cannot be opened."
 
         private val HARDWARE = mapOf(
             "camera" to "camera still photos (no video, barcode scanning or text recognition)",

@@ -17,12 +17,14 @@ public final class HardwareContract {
         Map.entry("battery", Set.of("get")),
         Map.entry("infrared", Set.of("frequencies","transmit")),
         Map.entry("nfc", Set.of("read")),
-        Map.entry("usb", Set.of("choose","claim","read","write","disconnect"))
+        Map.entry("usb", Set.of("choose","claim","read","write","disconnect")),
+        // Documents and folders the user picks in the system file picker; arguments are checked by PhoneFilesContract.parse.
+        Map.entry(PhoneFilesContract.CAPABILITY, PhoneFilesContract.OPERATIONS)
     );
     public static final Set<String> CAPABILITIES;
     static {
         Set<String> all = new HashSet<>(OPERATIONS.keySet());
-        all.add("microphone.pitch"); all.add("storage.project");
+        all.add("microphone.pitch"); all.add("storage.project"); all.add(FilesContract.CAPABILITY);
         CAPABILITIES = Set.copyOf(all);
     }
     private HardwareContract() {}
@@ -32,7 +34,9 @@ public final class HardwareContract {
         String id = text(effect,"id",64), capability=text(effect,"capability",32), operation=text(effect,"operation",32);
         if (!REQUEST_ID.matcher(id).matches()) throw new IllegalArgumentException("Invalid request id");
         if (!OPERATIONS.getOrDefault(capability,Set.of()).contains(operation)) throw new IllegalArgumentException("Unsupported hardware operation");
-        if (!effect.get("args").isJsonObject() || effect.get("args").toString().length()>20000) throw new IllegalArgumentException("Invalid hardware arguments");
+        // File writes carry up to 12,000 bytes of text, which JSON escaping can grow past the 20,000 used for devices.
+        int limit=PhoneFilesContract.CAPABILITY.equals(capability) ? ScriptEngine.MAX_MESSAGE : 20000;
+        if (!effect.get("args").isJsonObject() || effect.get("args").toString().length()>limit) throw new IllegalArgumentException("Invalid hardware arguments");
     }
     private static String text(JsonObject o,String key,int limit) {
         JsonElement v=o.get(key);

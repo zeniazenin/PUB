@@ -1,6 +1,7 @@
 package app.pub
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pub.hardware.*
 import app.pub.builder.BuilderModel
+import app.pub.core.PhoneFilesContract
 import app.pub.projects.SavedProject
 import app.pub.ui.*
 
@@ -118,6 +120,25 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
             hardwarePermissions.launch(permissions)
         }
     }
+    // The system file picker (capability files). Results go to the model's pending request, which survives this Activity
+    // being recreated; launched marks it so a recreated Activity does not open the picker twice.
+    val openFile = rememberLauncherForActivityResult(FilePickerContracts.OpenFile()) { model.filePickerResult(it?.let(::listOf)) }
+    val openFiles = rememberLauncherForActivityResult(FilePickerContracts.OpenFiles()) { model.filePickerResult(it) }
+    val openFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { model.filePickerResult(it?.let(::listOf)) }
+    val createFile = rememberLauncherForActivityResult(FilePickerContracts.CreateFile()) { model.filePickerResult(it?.let(::listOf)) }
+    LaunchedEffect(model.filePicker) {
+        val pick = model.filePicker ?: return@LaunchedEffect
+        if (pick.launched) return@LaunchedEffect
+        pick.launched = true
+        try {
+            when (pick.mode) {
+                "open" -> openFile.launch(pick.mimeTypes)
+                "openMultiple" -> openFiles.launch(pick.mimeTypes)
+                "folder" -> openFolder.launch(null)
+                else -> createFile.launch(pick.createType to pick.name)
+            }
+        } catch (_: ActivityNotFoundException) { model.filePickerResult(null, failed = true) }
+    }
     MaterialTheme(colorScheme = colors) {
         Surface(Modifier.fillMaxSize(), color = colors.background) {
             Column(Modifier.safeDrawingPadding().fillMaxSize()) {
@@ -169,7 +190,9 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
             model.hardwarePrompt?.let { request -> AlertDialog(
                 onDismissRequest={model.hardwareConsent(false)},
                 title={Text("Allow ${model.projectName} to use ${HardwareInventory.labels[request.capability] ?: request.capability}?")},
-                text={Text("Access is limited to this app while PUB is open. You can change it in Settings → Access.")},
+                text={Text(if(request.capability!=PhoneFilesContract.CAPABILITY) "Access is limited to this app while PUB is open. You can change it in Settings → Access."
+                    else if(model.preview) "You choose each file or folder in Android's file picker; this preview can use only what you pick, until you close it. Your files are never deleted when the preview closes."
+                    else "You choose each file or folder in Android's file picker; the app can use only what you pick, and only while it is open in PUB. It keeps access to what you picked until you forget it in Settings → Access. Deleting the app never deletes your files.")},
                 confirmButton={Column {
                     TextButton(onClick={model.hardwareConsent(true)}) {Text("Allow this session")}
                     if(!model.preview) TextButton(onClick={model.hardwareConsent(true,true)}) {Text("Always allow while open")}
@@ -196,7 +219,7 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
             )
             deleteTarget?.let { project -> AlertDialog(
                 onDismissRequest = { deleteTarget = null }, title = { Text("Delete ${project.bundle.name}?") },
-                text = { Text("This removes the app and its saved data from this phone.") },
+                text = { Text("This removes the app and its saved data from this phone. Files and folders you picked for it elsewhere on the phone are kept; only its access to them ends.") },
                 confirmButton = { TextButton(onClick = { model.deleteProject(project); if (builder.editingProject?.id == project.id) builder.beginCreate(); deleteTarget = null }) { Text("Delete") } },
                 dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
             ) }
@@ -216,8 +239,9 @@ private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, sa
     }
     HorizontalDivider()
     if (model.hardwareAccessEnabled) Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
-        Text("Device access enabled",modifier=Modifier.weight(1f),style=MaterialTheme.typography.labelMedium)
-        TextButton(onClick=model::stopHardware){Text("Stop hardware")}
+        val filesOnly = model.onlyFileAccessActive
+        Text(if (filesOnly) "Phone file access enabled" else "Device access enabled",modifier=Modifier.weight(1f),style=MaterialTheme.typography.labelMedium)
+        TextButton(onClick=model::stopHardware){Text(if (filesOnly) "Stop access" else "Stop hardware")}
     }
     if (model.listening) Surface(color=MaterialTheme.colorScheme.primaryContainer) {
         Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -226,7 +250,7 @@ private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, sa
         }
     }
     if (model.preview) Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-        Text(if (model.previewEditTarget != null) "Save changes updates the app code. Your existing saved data and photos are kept; preview changes are discarded." else "Try it before saving. Closing discards preview changes.",modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
+        Text(if (model.previewEditTarget != null) "Save changes updates the app code. Your existing saved data, files and photos are kept; changes made in this preview are discarded." else "Try it before saving. Closing discards preview changes, including its files.",modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
         Button(onClick=save,enabled=model.ui!=null && model.failure==null && !model.savingPreview,modifier=Modifier.testTag("save-preview")) {
             Text(if (model.savingPreview) "Saving…" else if (model.previewEditTarget != null) "Save changes" else "Save locally")
         }

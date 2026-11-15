@@ -1,6 +1,8 @@
 package app.pub.builder
 
 import app.pub.BuildConfig
+import app.pub.core.FilesContract
+import app.pub.core.PhoneFilesContract
 import app.pub.core.ScriptEngine
 import app.pub.core.ProjectBundle
 import app.pub.hardware.ProjectMedia
@@ -29,6 +31,14 @@ object BuildEnvironment {
             addProperty("vectorShapesPerAsset",128);addProperty("highlightedShapes",16)
             addProperty("savedPhotos",ProjectMedia.MAX_PHOTOS)
             addProperty("photoBytes",ProjectMedia.MAX_PHOTO_BYTES);addProperty("projectPhotoBytes",ProjectMedia.MAX_PROJECT_BYTES)
+            addProperty("appFilesBytes",FilesContract.QUOTA_BYTES);addProperty("appFilesEntries",FilesContract.QUOTA_ENTRIES)
+            addProperty("fileChunkBytes",FilesContract.MAX_CHUNK_BYTES);addProperty("fileListEntriesPerReply",FilesContract.MAX_LIST_ENTRIES)
+            addProperty("filePathCharacters",FilesContract.MAX_PATH_CHARS);addProperty("filePathDepth",FilesContract.MAX_DEPTH)
+            addProperty("fileNameCharacters",FilesContract.MAX_NAME_CHARS);addProperty("pendingFileRequests",FilesContract.MAX_PENDING)
+            // Files the user picks on the phone (hardware capability files).
+            addProperty("pickedFilesAndFoldersPerApp",PhoneFilesContract.MAX_GRANTS);addProperty("filesPerMultiplePick",PhoneFilesContract.MAX_PICK)
+            addProperty("pickedFolderNameCharacters",PhoneFilesContract.MAX_NAME_CHARS);addProperty("pickedFolderPathDepth",PhoneFilesContract.MAX_DEPTH)
+            addProperty("pickedFolderEntriesListed",PhoneFilesContract.MAX_FOLDER_CHILDREN);addProperty("pendingPhoneFileRequests",PhoneFilesContract.MAX_PENDING)
         })
         add("uiComponents",JsonArray().apply {listOf("column","text","button","input","choices","meter","image","graphic").forEach {add(it)}})
         add("microphonePitch",JsonObject().apply {
@@ -48,8 +58,10 @@ object BuildEnvironment {
         containing synchronous JavaScript source and optional native graphical assets. Do not output Kotlin,
         Java, an APK, Gradle project, web page, React, HTML/CSS, SVG, npm packages, Docker or shell commands.
         JavaScript executes offline in a separate Android isolated service using the Rhino ES6 interpreter.
-        It is not a browser, Node.js, a WebView or a container. There is no DOM, network client, filesystem,
-        Java/Android bridge, library installation, imports, promises, async/await, timers, workers or background execution.
+        It is not a browser, Node.js, a WebView or a container. There is no DOM, network client, filesystem API
+        (only the host's files.request effect on the app's private folder, and the files hardware capability for documents
+        the user picks in Android's file picker), Java/Android bridge, library installation, imports, promises,
+        async/await, timers, workers or background execution.
         All native behavior must use the exact declarative UI/event/effect contracts below. Unknown APIs and
         properties are not implemented. Hardware presence in the inventory does not imply a supported broker operation.
         Init and every event must synchronously return a complete UI packet quickly: load/dispatch budget150ms,
@@ -61,12 +73,12 @@ object BuildEnvironment {
         with a bounded height (graphic node up to340dp). Vector coordinates are asset-space units, not screen pixels.
         Respect the provided measured preview viewport when available; phone resolution includes system/host chrome.
         The host owns Back/Close/Save, safe insets, scrolling, permissions, microphone capture and image decoding.
-        Saved app JSON state and camera photos are local and scoped. Edits receive current code and asset definitions,
-        not saved personal data/photo files. Preserve storage keys and existing asset IDs where possible.
+        Saved app JSON state, private files and camera photos are local and scoped. Edits receive current code and asset
+        definitions, not saved personal data, files or photos. Preserve storage keys, file paths and existing asset IDs where possible.
         Runtime microphone.pitch currently estimates65..400Hz; never promise reliable notes outside that band.
         Its status events report active recording or a terminal stop/denial/failure. Keep a Start action available
         after denial/stop; wait for status rather than assuming permission. No microphone effects during init.
-        Visual review captures a clean initial UI with empty storage and no hardware access, so it cannot validate
+        Visual review captures a clean initial UI with empty storage, no file replies and no hardware access, so it cannot validate
         listening, pitch accuracy, button behavior or persisted state. Never change runtime behavior merely to make
         an empty-data screenshot look successful. Repairs must preserve the original user requirements and capabilities.
         Match the exact supported contracts below; if a requirement cannot be met, state the limitation honestly.

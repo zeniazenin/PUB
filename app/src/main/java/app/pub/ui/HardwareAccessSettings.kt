@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.pub.HostModel
 import app.pub.core.PermissionPolicy.Rule
+import app.pub.core.PhoneFilesContract
 import app.pub.hardware.HardwareInventory
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -58,7 +59,22 @@ fun HardwareAccessSettings(host:HostModel,onAndroidSettings:()->Unit) {
                 FilterChip(selected=own==rule,onClick={if(mic) host.changeProjectRule(selected.first,rule) else host.changeHardwareRule(selected.first,cap,rule)},label={Text(label)})
             }
         }
+        if(cap==PhoneFilesContract.CAPABILITY) FileAccessForApp(host,selected.first)
     }
+    if(cap==PhoneFilesContract.CAPABILITY) Text("Apps see only the files and folders you pick in Android's file picker, by name, size and type. A rule controls whether an app may use them; Forget file access removes what it was given. Your files are never deleted with an app.",style=MaterialTheme.typography.bodySmall)
     Text("Apps must declare the capability. Android permissions and device selection still apply. Changing access stops active hardware sessions.",style=MaterialTheme.typography.bodySmall)
     OutlinedButton(onClick=onAndroidSettings){Text("Android app permissions")}
+}
+
+/** How many files and folders the saved app [id] was given, and Forget file access, which releases them all. */
+@Composable
+private fun FileAccessForApp(host:HostModel,id:String) {
+    val count by produceState<Int?>(null,id,host.fileGrantsRevision) { value=runCatching { host.fileGrantCount(id) }.getOrNull() }
+    Text(when(count) {
+        null -> "Checking file access…"
+        0 -> "No files or folders picked for this app"
+        1 -> "Has access to 1 file or folder you picked"
+        else -> "Has access to $count files and folders you picked"
+    },style=MaterialTheme.typography.bodyMedium)
+    OutlinedButton(onClick={host.forgetFileAccess(id)},enabled=(count ?: 0)>0,modifier=Modifier.testTag("forget-file-access")){Text("Forget file access")}
 }

@@ -29,7 +29,7 @@ Parsing is strict (Gson `STRICT`, streaming): unknown or duplicate fields, wrong
 
 1. Start the isolated runtime and send `init` with the preview device context (the build's generation context), `settings: {}` and `storage: {}`.
 2. Before each step, the step's control must be on the current screen: an `action` step needs a button or choices option with that action id, an `input` step an input with that id. Otherwise the test fails with "Cannot perform step N…", as a user could not do it either.
-3. Send the step as the host's own `action`/`input` event and wait for the next UI packet. Packets are validated by `RuntimeClient` with `UiPacket.parse`, exactly as for a running app. All effects are discarded: `storage.save` is not persisted, `hardware.request` never runs, the microphone never starts, and no status, pitch or hardware events are sent.
+3. Send the step as the host's own `action`/`input` event and wait for the next UI packet. Packets are validated by `RuntimeClient` with `UiPacket.parse`, exactly as for a running app. All effects are discarded: `storage.save` is not persisted, `hardware.request` and `files.request` never run, the microphone never starts, and no status, pitch, hardware or files events are sent.
 4. After the last step (after `init` when there are none), evaluate the expectations against the visible text.
 
 Visible text (`AppTestSuite.visibleLines`) is one line per element: text node text, button labels, choices labels (selected ones prefixed `[selected] `), inputs as `label: value`, image and graphic descriptions, and meters as `meter -12.0`. Lines are joined, whitespace runs (including no-break spaces and line breaks) collapse to one space, and each `expect` string must be, and each `expectAbsent` string must not be, a case-sensitive substring.
@@ -90,7 +90,7 @@ Lifecycle:
 1. **Save.** `BuilderController.markSaved` for the current draft writes the spec off the main thread inside its existing coroutine, before (and independently of) the prompt-history update. A new app gets `request` = the draft's original request (the user's request of the session's first build, never an automatic repair instruction) and the draft's committed brief and suite. A saved edit keeps the stored `request` and replaces `brief` and `tests` with the edit build's. An app without a readable spec (for example one saved before specs existed) starts one with its first saved edit's original request. A save that does not belong to the current draft leaves specs unchanged.
 2. **Failure.** A spec write failure never undoes the saved app: PUB removes the old spec (so a stored spec never describes an earlier version of the app) and shows "App saved locally. Its research and behavior checks could not be stored, so its next edit researches the change on its own."
 3. **Edit.** `beginEdit` and the restoration of an edit draft read the spec in the background into `editingSpec`; `generate()` waits for that read. An unreadable spec sets `editingSpecNote` and the edit continues without it. After a save, the builder shows the spec that was just written.
-4. **Delete.** `HostModel.deleteProject` deletes the app's spec with its package, data, photos and rules.
+4. **Delete.** `HostModel.deleteProject` deletes the app's spec with its package, data, files, photos and rules.
 
 The draft snapshot stores the draft's `originalRequest` (version 4), never the spec itself.
 

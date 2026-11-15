@@ -106,6 +106,18 @@ class ProjectMedia(context: Context) {
         check(!directory.exists() || directory.deleteRecursively()) { "Could not delete project photos" }
     }
 
+    /** The project's completed photo assets by name (no temporary captures), for its app's photos/ file folder. */
+    fun photos(projectId: String): List<File> = synchronized(lock) {
+        if (!validProjectId(projectId)) return@synchronized emptyList()
+        val directory = checkedDirectory(projectId)
+        directory.listFiles().orEmpty().filter {
+            ASSET.matches(it.name) && it.isFile && it.length() in 1..MAX_PHOTO_BYTES && it.canonicalFile.parentFile == directory.canonicalFile
+        }.sortedBy { it.name }
+    }
+
+    /** Deletes one completed photo of the project, with the same scoping as [resolve]; false when there is none. */
+    fun deletePhoto(projectId: String, asset: String): Boolean = synchronized(lock) { resolve(projectId, asset)?.delete() == true }
+
     /** Public static camera metadata only; no frames, photos, location, or personal identifiers. */
     fun inventory(): JsonObject = CameraCatalog.inventory(appContext).apply {
         addProperty("present", appContext.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY))

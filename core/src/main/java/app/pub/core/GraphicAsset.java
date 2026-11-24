@@ -4,6 +4,7 @@ import java.util.regex.Pattern;
 import com.google.gson.*;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.zip.CRC32;
 
@@ -12,7 +13,20 @@ public final class GraphicAsset {
     public static final int MAX_PNG_BYTES = 4 * 1024 * 1024;
     public static final int MAX_IMAGE_DIMENSION = 2048;
     public static final long MAX_IMAGE_PIXELS = 4_000_000L;
-    private static final Set<String> COLORS = Set.of("primary", "surface", "onSurface", "outline", "transparent");
+    /**
+     * Theme colour names a shape may use instead of a fixed hex colour: Material colour roles of the user's style guide
+     * ({@link StyleGuide}, {@link StyleColors}), looked up when the shape is drawn, so graphics follow the style and its
+     * light or dark mode; and "transparent". Hex colours never change.
+     */
+    public static final List<String> THEME_COLORS = List.of(
+        "primary", "onPrimary", "primaryContainer", "onPrimaryContainer",
+        "secondary", "onSecondary", "secondaryContainer", "onSecondaryContainer",
+        "tertiary", "onTertiary", "tertiaryContainer", "onTertiaryContainer",
+        "error", "onError", "errorContainer", "onErrorContainer",
+        "surface", "onSurface", "surfaceVariant", "onSurfaceVariant",
+        "surfaceContainer", "surfaceContainerHigh", "surfaceContainerHighest",
+        "outline", "outlineVariant", "inverseSurface", "inverseOnSurface", "transparent");
+    private static final Set<String> COLORS = Set.copyOf(THEME_COLORS);
     private static final Set<String> STYLE = Set.of("id", "type", "fill", "stroke", "strokeWidth");
     private GraphicAsset() {}
 
@@ -85,7 +99,7 @@ public final class GraphicAsset {
         }
         keys(shape, allowed);
         for (String key : Set.of("fill", "stroke")) if (shape.has(key)) {
-            String color = text(shape, key, 16);
+            String color = text(shape, key, 24);
             if (!COLORS.contains(color) && !HEX_COLOR.matcher(color).matches()) throw bad("Invalid graphic color");
         }
         if (shape.has("strokeWidth")) number(shape, "strokeWidth", 0, 20);

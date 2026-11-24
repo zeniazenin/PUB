@@ -47,7 +47,8 @@ fun AppIconTile(name: String, icon: JsonObject?, modifier: Modifier = Modifier, 
     val pictogram = remember(icon, name) {
         icon?.takeIf { AppIcon.isPictogram(it) } ?: if (icon == null) builtIn(name) else null
     }
-    Box(modifier.size(size).clip(RoundedCornerShape(size * .3f)).background(background).testTag("app-icon"), contentAlignment = Alignment.Center) {
+    val corner = PubShapes.tile(LocalPubStyle.current.corners)
+    Box(modifier.size(size).clip(RoundedCornerShape(size * corner)).background(background).testTag("app-icon"), contentAlignment = Alignment.Center) {
         if (pictogram != null) Pictogram(pictogram, tint, background, Modifier.size(size * .7f), "$name icon")
         else NativeGraphic(icon!!, "$name icon", modifier = Modifier.size(size * .85f), maxDecodeSize = 256)
     }

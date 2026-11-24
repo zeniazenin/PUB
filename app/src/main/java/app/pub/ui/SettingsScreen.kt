@@ -29,6 +29,7 @@ fun SettingsScreen(
     onHelp: () -> Unit,
     onHardwareCheck: () -> Unit,
     onInventory: () -> Unit,
+    onStyle: () -> Unit,
     onDelete: (SavedProject) -> Unit
 ) {
     val context = LocalContext.current
@@ -96,17 +97,11 @@ fun SettingsScreen(
 
         HorizontalDivider()
         Text("Style", style = MaterialTheme.typography.titleLarge)
-        Text("Choose one accent for PUB and all your apps.")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("moss", "blue", "violet").forEach { accent ->
-                FilterChip(
-                    selected = host.accent == accent,
-                    onClick = { host.changeAccent(accent) },
-                    label = { Text(accent.replaceFirstChar { it.uppercase() }) },
-                    modifier = Modifier.testTag("style-$accent")
-                )
-            }
-        }
+        Text("One style guide for PUB and all your apps: light or dark, colours, corners and font. You can turn it off for any app; that app then uses PUB's default style.")
+        val optedOut = host.projects.count { !host.usesStyleGuide(it.id) }
+        if (optedOut > 0) Text(if (optedOut == 1) "1 app uses PUB's default style instead." else "$optedOut apps use PUB's default style instead.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(onClick = onStyle, modifier = Modifier.fillMaxWidth().testTag("style-guide")) { Text("Edit style guide") }
 
         HorizontalDivider()
         HardwareAccessSettings(host,onAndroidSettings)

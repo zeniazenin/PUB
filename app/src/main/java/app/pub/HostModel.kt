@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import app.pub.core.StyleGuide
 import app.pub.core.PermissionPolicy.Rule
 import app.pub.hardware.*
 import app.pub.core.FilesContract
@@ -189,8 +190,16 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         private set
     var askPermission by mutableStateOf(false)
     var askAndroidPermission by mutableStateOf(false)
-    var accent by mutableStateOf(prefs.getString("accent", "moss") ?: "moss")
+    private val stylePrefs = context.getSharedPreferences("style", Context.MODE_PRIVATE)
+    /**
+     * The user's style guide for PUB and every app. Before style guides an install had only an accent, which becomes
+     * its guide until the user changes it.
+     */
+    var styleGuide by mutableStateOf(stylePrefs.getString("guide", null)?.let { runCatching { StyleGuide.parse(it) }.getOrNull() }
+        ?: StyleGuide.fromLegacyAccent(prefs.getString("accent", null)))
         private set
+    /** Saved apps the user set not to follow the style guide; they use PUB's default style. */
+    private var styleOptOuts by mutableStateOf(stylePrefs.getStringSet("optOut", null)?.toSet() ?: emptySet())
     var globalBlocked by mutableStateOf(false)
         private set
     var globalDefault by mutableStateOf(Rule.ASK)
@@ -344,6 +353,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
             // Its access to files on the phone ends (permissions no other app holds are released); the documents stay.
             phoneFiles.later({ phoneFiles.store.forget(project.id) }) { fileGrantsRevision++ }
             permissionPrefs.edit().apply { HardwareContract.OPERATIONS.keys.forEach {remove("${project.id}.$it")} }.apply()
+            if (project.id in styleOptOuts) { styleOptOuts = styleOptOuts - project.id; stylePrefs.edit().putStringSet("optOut", styleOptOuts.toSet()).apply() }
             context.deleteSharedPreferences("project.${project.id}")
             context.getSharedPreferences("permissions", Context.MODE_PRIVATE).edit().remove("${project.id}.microphone").apply()
             // Update the launcher at once; the background reread also covers a library load still in flight.
@@ -377,7 +387,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
                 runtime?.send(event("init").apply {
                     // Legacy dropD/reference preferences, still read at init by apps saved from the former built-in tuner.
                     add("settings", JsonObject().apply { val settings = previewEditTarget?.let { context.getSharedPreferences("project.${it.id}", Context.MODE_PRIVATE) } ?: projectPrefs; addProperty("dropD", settings.getBoolean("dropD", false)); addProperty("reference", settings.getInt("reference", 440)) })
-                    add("device", deviceContext())
+                    add("device", deviceContext(openAppStyle))
                     add("storage", if (preview) previewData.deepCopy() else runCatching { JsonParser.parseString(projectPrefs.getString("data", "{}")).asJsonObject }.getOrDefault(JsonObject()))
                 })
             }, onPacket = ::receive, onError = { message ->
@@ -457,11 +467,23 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         // The legacy tuner ID is valid only for an existing saved package, like any UUID.
         require(ProjectStore.isAppId(id) && projects.any { it.id == id }) { "Unknown project" }
     }
-    fun changeAccent(value: String) {
-        require(value in setOf("moss", "blue", "violet"))
-        accent = value
-        prefs.edit().putString("accent", value).apply()
+    fun changeStyleGuide(value: StyleGuide) {
+        styleGuide = value
+        stylePrefs.edit().putString("guide", value.toJson()).apply()
     }
+    /** Whether the saved app [id] follows the style guide (the default) instead of PUB's default style. */
+    fun usesStyleGuide(id: String): Boolean = id !in styleOptOuts
+    fun changeUsesStyleGuide(id: String, value: Boolean) {
+        requireProjectId(id)
+        styleOptOuts = if (value) styleOptOuts - id else styleOptOuts + id
+        stylePrefs.edit().putStringSet("optOut", styleOptOuts.toSet()).apply()
+    }
+    /** The style app [id] is drawn and built in: the style guide, or PUB's default style when the app does not follow it. A new app (null) follows it. */
+    fun styleFor(id: String?): StyleGuide = if (id == null || usesStyleGuide(id)) styleGuide else StyleGuide.DEFAULT
+    /** The open app's style; a preview of an edit follows its saved app's choice, other previews the style guide. */
+    val openAppStyle: StyleGuide get() = styleFor(if (preview) previewEditTarget?.id else projectId.takeIf { projectOpen && it.isNotBlank() })
+    /** Whether the phone's dark theme is on, for guides that follow it. */
+    private fun systemDark() = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
     private fun syncPolicies() {
         globalBlocked = broker.globalBlocked; globalDefault = broker.globalDefault
         appRule = if (projectOpen) broker.appRule else Rule.INHERIT
@@ -474,7 +496,7 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     fun updateBuilderViewport(width:Int,height:Int) {
         builderViewportWidthPx=width.coerceAtLeast(0);builderViewportHeightPx=height.coerceAtLeast(0)
     }
-    fun generationContext(editingId:String?=null): String = deviceContext().apply {
+    fun generationContext(editingId:String?=null): String = deviceContext(styleFor(editingId)).apply {
         add("buildEnvironment",app.pub.builder.BuildEnvironment.metadata())
         val metrics=context.resources.displayMetrics
         add("layoutContext",JsonObject().apply {
@@ -506,10 +528,11 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         addProperty("gpsPresent", context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION_GPS))
         addProperty("cameraRuntimeAvailable", true); addProperty("gpsRuntimeAvailable", true)
         add("hardwareGloballyBlocked", com.google.gson.JsonArray().apply {HardwareContract.OPERATIONS.keys.filter {hardwareBlocked(it)}.forEach {add(it)}})
-        addProperty("uiTheme", "dark"); addProperty("locale", context.resources.configuration.locales[0].toLanguageTag())
+        addProperty("locale", context.resources.configuration.locales[0].toLanguageTag())
         addProperty("supportedCapabilities", HardwareContract.CAPABILITIES.sorted().joinToString(", "))
     }.toString()
-    private fun deviceContext() = JsonObject().apply {
+    /** [style] is the style the app is drawn in; its colours, corners and font, never any text, go to the app and to builds. */
+    private fun deviceContext(style: StyleGuide) = JsonObject().apply {
         addProperty("schemaVersion", 1)
         add("hardware", HardwareInventory.describe(context))
         addProperty("manufacturer", Build.MANUFACTURER)
@@ -523,7 +546,8 @@ class HostModel(application: Application) : AndroidViewModel(application) {
         addProperty("fontScale", context.resources.configuration.fontScale)
         addProperty("screenWidthDp", context.resources.configuration.screenWidthDp)
         addProperty("screenHeightDp", context.resources.configuration.screenHeightDp)
-        addProperty("accent", accent)
+        addProperty("uiTheme", if (style.dark(systemDark())) "dark" else "light")
+        add("styleGuide", style.toJsonObject())
         addProperty("hostUid", Process.myUid())
         addProperty("cloudConnection", false)
     }

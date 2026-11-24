@@ -1,6 +1,7 @@
 package app.pub.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
@@ -15,8 +16,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,7 +34,10 @@ fun LauncherBrand(modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         // The adaptive-icon artwork includes transparent safety margins. Enlarge it within
         // this clipped slot so the visible mark matches the header's intended logo size.
-        Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+        // The mark is drawn for the launcher icon's dark pine background, which it keeps on a light theme.
+        val light = MaterialTheme.colorScheme.background.luminance() > .5f
+        Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).then(if (light) Modifier.background(colorResource(R.color.icon_background)) else Modifier),
+            contentAlignment = Alignment.Center) {
             Image(painterResource(R.drawable.pub_icon_art), contentDescription = "PUB",
                 modifier = Modifier.requiredSize(90.dp))
         }
@@ -55,7 +63,9 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
             verticalArrangement = Arrangement.spacedBy(26.dp)
         ) {
             items(host.projects, key = { it.id }) { project ->
-                LauncherTile(project.id, project.bundle.name, graphic = project.bundle.icon?.let { project.bundle.assets[it]?.asJsonObject }, onEdit = { onEdit(project) }, onDelete = { onDelete(project) }, onReport = { onReport(project) }) { host.openProject(project) }
+                LauncherTile(project.id, project.bundle.name, graphic = project.bundle.icon?.let { project.bundle.assets[it]?.asJsonObject },
+                    followsStyle = host.usesStyleGuide(project.id), onFollowStyle = { host.changeUsesStyleGuide(project.id, it) },
+                    onEdit = { onEdit(project) }, onDelete = { onDelete(project) }, onReport = { onReport(project) }) { host.openProject(project) }
             }
         }
         Button(
@@ -67,12 +77,13 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LauncherTile(id: String, name: String, graphic: com.google.gson.JsonObject? = null, onEdit: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onOpen: () -> Unit) {
+private fun LauncherTile(id: String, name: String, graphic: com.google.gson.JsonObject? = null, followsStyle: Boolean, onFollowStyle: (Boolean) -> Unit,
+                         onEdit: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onOpen: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     Box {
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-            .combinedClickable(role = Role.Button, onClickLabel = "Open $name", onLongClickLabel = "Edit, delete or report $name", onLongClick = { menuOpen = true }, onClick = onOpen)
+            .combinedClickable(role = Role.Button, onClickLabel = "Open $name", onLongClickLabel = "Edit, style, delete or report $name", onLongClick = { menuOpen = true }, onClick = onOpen)
             .testTag("app-$id").padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -83,6 +94,9 @@ private fun LauncherTile(id: String, name: String, graphic: com.google.gson.Json
     }
     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
         DropdownMenuItem(text = { Text("Edit app") }, modifier = Modifier.testTag("edit-app-$id"), onClick = { menuOpen = false; onEdit() })
+        DropdownMenuItem(text = { Text("Use style guide") }, trailingIcon = { if (followsStyle) Text("✓") },
+            modifier = Modifier.testTag("style-app-menu-$id").semantics { stateDescription = if (followsStyle) "On" else "Off" },
+            onClick = { menuOpen = false; onFollowStyle(!followsStyle) })
         DropdownMenuItem(text = { Text("Delete app") }, modifier = Modifier.testTag("delete-app-$id"), onClick = { menuOpen = false; onDelete() })
         DropdownMenuItem(text = { Text("Report app") }, modifier = Modifier.testTag("report-app-$id"), onClick = { menuOpen = false; onReport() })
     }

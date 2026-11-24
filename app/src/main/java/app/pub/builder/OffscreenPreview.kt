@@ -12,7 +12,6 @@ import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
 import android.view.WindowManager
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.BroadcastFrameClock
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Recomposer
@@ -35,7 +34,8 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import app.pub.core.ProjectBundle
 import app.pub.ui.BuildVisualPreview
-import app.pub.ui.PubColors
+import app.pub.core.StyleGuide
+import app.pub.ui.PubTheme
 import com.google.gson.JsonObject
 import kotlinx.coroutines.*
 import kotlin.math.max
@@ -112,7 +112,7 @@ object OffscreenPreview {
                 setContent {
                     CompositionLocalProvider(LocalDensity provides Density(spec.density, spec.fontScale),
                         LocalLayoutDirection provides spec.direction) {
-                        MaterialTheme(colorScheme = PubColors.scheme(device.text("accent") ?: "moss")) {
+                        PubTheme(previewStyle(device), previewDark(device)) {
                             BuildVisualPreview(bundle, device,
                                 onCaptured = { result.complete(it) },
                                 onFailure = { result.completeExceptionally(IllegalStateException(it)) })
@@ -188,6 +188,17 @@ object OffscreenPreview {
         }
         return Viewport(width, height, density, fontScale, direction)
     }
+    /**
+     * The style the draft is built for, from its build context: the app's style guide (or PUB's default style for an
+     * app that does not follow it), else, for contexts saved before style guides, the legacy accent.
+     */
+    internal fun previewStyle(device: JsonObject): StyleGuide =
+        device.get("styleGuide")?.takeIf { it.isJsonObject }?.let { runCatching { StyleGuide.fromJson(it.asJsonObject) }.getOrNull() }
+            ?: StyleGuide.fromLegacyAccent(device.text("accent"))
+
+    /** Light or dark as the build context recorded it, so the review sees what the phone showed; dark before style guides. */
+    internal fun previewDark(device: JsonObject): Boolean = device.text("uiTheme") != "light"
+
     private fun JsonObject.text(name: String): String? = get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
     private fun JsonObject.number(name: String, min: Double, max: Double): Double? =
         get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asDouble?.takeIf { it.isFinite() && it in min..max }

@@ -175,13 +175,15 @@ private fun RenderNode(wrapped: UiNode, onAction: (String) -> Unit, onInput: (St
 @Composable
 private fun ScriptButton(label: String, style: String, onClick: () -> Unit) {
     val modifier = (if (LocalInRow.current || style == "text") Modifier else Modifier.fillMaxWidth()).heightIn(min = 48.dp)
+    // Buttons take the style guide's corners; Material's own buttons are always pill-shaped.
+    val shape = PubShapes.button(LocalPubStyle.current.corners)
     when (style) {
-        "secondary" -> OutlinedButton(onClick = onClick, modifier = modifier) { Text(label) }
+        "secondary" -> OutlinedButton(onClick = onClick, modifier = modifier, shape = shape) { Text(label) }
         // Shifted by its own padding outside a row, so its label lines up with the text above it.
-        "text" -> TextButton(onClick = onClick, modifier = if (LocalInRow.current) modifier else modifier.offset(x = (-12).dp)) { Text(label) }
-        "danger" -> Button(onClick = onClick, modifier = modifier, colors = ButtonDefaults.buttonColors(
+        "text" -> TextButton(onClick = onClick, modifier = if (LocalInRow.current) modifier else modifier.offset(x = (-12).dp), shape = shape) { Text(label) }
+        "danger" -> Button(onClick = onClick, modifier = modifier, shape = shape, colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) { Text(label) }
-        else -> Button(onClick = onClick, modifier = modifier) { Text(label) }
+        else -> Button(onClick = onClick, modifier = modifier, shape = shape) { Text(label) }
     }
 }
 
@@ -196,7 +198,7 @@ private fun ScriptListItem(node: JsonObject, onAction: (String) -> Unit) {
     val checked = node["checked"]?.asBoolean
     val selected = node["selected"]?.asBoolean ?: false
     val colors = MaterialTheme.colorScheme
-    var modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+    var modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(PubShapes.item(LocalPubStyle.current.corners)))
     if (action != null) modifier = modifier.testTag("item-$action").let {
         if (checked != null) it.toggleable(value = checked, role = Role.Checkbox, onValueChange = { onAction(action) })
         else it.clickable(role = Role.Button) { onAction(action) }

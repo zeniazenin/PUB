@@ -9,11 +9,13 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -70,7 +72,16 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
         view.keepScreenOn = model.listening
         onDispose { view.keepScreenOn = false }
     }
-    val colors=PubColors.scheme(model.accent)
+    // A running app is drawn in its own style (the style guide, or PUB's default style if it does not follow it);
+    // PUB's screens in the style guide.
+    val style = if (model.projectOpen) model.openAppStyle else model.styleGuide
+    val dark = style.dark(isSystemInDarkTheme())
+    val activity = LocalActivity.current as? ComponentActivity
+    LaunchedEffect(dark) {
+        val transparent = android.graphics.Color.TRANSPARENT
+        val bars = if (dark) SystemBarStyle.dark(transparent) else SystemBarStyle.light(transparent, transparent)
+        activity?.enableEdgeToEdge(bars, bars)
+    }
     var destination by rememberSaveable { mutableStateOf("launcher") }
     var settingsReturn by rememberSaveable { mutableStateOf("launcher") }
     var historyReturn by rememberSaveable { mutableStateOf("builder") }
@@ -117,7 +128,7 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
     val openSettings = { settingsReturn = destination; destination = "settings" }
     val back = {
         if (model.projectOpen) closeProject()
-        else { destination = when (destination) { "help", "inventory" -> "settings"; "history" -> historyReturn; "settings" -> settingsReturn; else -> "launcher" } }
+        else { destination = when (destination) { "help", "inventory", "style" -> "settings"; "history" -> historyReturn; "settings" -> settingsReturn; else -> "launcher" } }
     }
     BackHandler(model.projectOpen || destination != "launcher", onBack = back)
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission(), model::androidPermissionResult)
@@ -152,8 +163,8 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
             }
         } catch (_: ActivityNotFoundException) { model.filePickerResult(null, failed = true) }
     }
-    MaterialTheme(colorScheme = colors) {
-        Surface(Modifier.fillMaxSize(), color = colors.background) {
+    PubTheme(style, dark) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.safeDrawingPadding().fillMaxSize()) {
                 if (model.projectOpen) {
                     RunningAppScreen(model, closeProject, editRunning, requestChanges) {
@@ -171,10 +182,10 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                         if (destination == "launcher") {
                             LauncherBrand(Modifier.weight(1f).padding(end = 12.dp))
                         } else {
-                            Text(when(destination) { "settings" -> "Settings"; "help" -> "Help & guide"; "inventory" -> "Hardware inventory"; "history" -> "Prompt history"; else -> if(builder.capturePending!=null) "Checking preview" else if (builder.editingProject != null) "Edit app" else "Create app" },
+                            Text(when(destination) { "settings" -> "Settings"; "help" -> "Help & guide"; "inventory" -> "Hardware inventory"; "style" -> "Style guide"; "history" -> "Prompt history"; else -> if(builder.capturePending!=null) "Checking preview" else if (builder.editingProject != null) "Edit app" else "Create app" },
                                 style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         }
-                        if (destination != "settings" && destination != "help" && destination != "inventory" && destination != "history") OutlinedButton(onClick = openSettings, modifier = Modifier.testTag("settings")) { Text("Settings") }
+                        if (destination != "settings" && destination != "help" && destination != "inventory" && destination != "style" && destination != "history") OutlinedButton(onClick = openSettings, modifier = Modifier.testTag("settings")) { Text("Settings") }
                     }
                     if(destination=="launcher" && (builder.buildInProgress || builder.hasBuildResult)) {
                         TextButton(onClick={destination="builder"},modifier=Modifier.fillMaxWidth().testTag("resume-build")) {
@@ -196,8 +207,9 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                             }
                             "history" -> PromptHistoryScreen(builder, historyProject, historySession)
                             "inventory" -> HardwareInventoryScreen()
+                            "style" -> StyleGuideScreen(model)
                             "help" -> HelpScreen(model)
-                            "settings" -> SettingsScreen(model, builder, openAndroidSettings, { destination = "help" }, { model.previewProject(HardwareDemo.bundle()) }, { destination = "inventory" }) { deleteTarget = it }
+                            "settings" -> SettingsScreen(model, builder, openAndroidSettings, { destination = "help" }, { model.previewProject(HardwareDemo.bundle()) }, { destination = "inventory" }, { destination = "style" }) { deleteTarget = it }
                         }
                     }
                 }

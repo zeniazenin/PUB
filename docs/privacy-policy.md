@@ -21,7 +21,7 @@ When you tap **Generate app** or **Generate changes**, PUB sends OpenAI a series
 - **Screen planning, building and icon design:**
   - your description and PUB's building instructions
   - the research findings
-  - details about your phone: manufacturer and model, Android version and API level, screen size, text size, language, light or dark theme, accent colour, which hardware features are available, the capabilities you blocked for all apps, and the features PUB supports
+  - details about your phone: manufacturer and model, Android version and API level, screen size, text size, language, light or dark theme, the app's style (your style guide's colours, corner shape and font, or PUB's default style), which hardware features are available, the capabilities you blocked for all apps, and the features PUB supports
   - for an edit: the app's current code and graphics definitions (not photo pixels), and its saved original request, research and behavior checks
 - **Checks and repairs:** a screenshot of the new app's first screen, rendered privately with empty storage and no hardware access. It's sent with your request, the research and the app's code so the model can check and fix the result. When a check fails, the failing checks are sent with the repair request.
 

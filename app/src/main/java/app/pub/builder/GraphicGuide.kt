@@ -1,5 +1,7 @@
 package app.pub.builder
 
+import app.pub.core.GraphicAsset
+
 object GraphicGuide {
     val CONTRACT = """
         GRAPHICAL ASSETS: You can create real scalable illustrations/icons/schematics as vector geometry,
@@ -11,7 +13,10 @@ object GraphicGuide {
         Use {type:'graphic',asset:'guitar',description:'Guitar strings',highlight:['string-0']} in the UI.
         Each dispatch can change highlight IDs; the host accents matching vector shapes. Max4 image/graphic nodes total.
         Vector definition: {type:'vector',width:320,height:400,shapes:[...]}. Width/height>0..1024; max128 shapes.
-        Every shape has unique id,type; optional fill/stroke ('#RRGGBB','#AARRGGBB',primary,surface,onSurface,outline,transparent),
+        Every shape has unique id,type; optional fill/stroke: '#RRGGBB', '#AARRGGBB', transparent, or a theme colour name:
+        ${GraphicAsset.THEME_COLORS.filter { it != "transparent" }.joinToString(",")}.
+        Theme colour names are the Material colour roles of the user's style guide and follow its colours and light or dark mode,
+        also when the user changes them later (the device context gives the current styleGuide and uiTheme); hex colours never change.
         strokeWidth0..20. Coordinates must be finite in -1024..2048. Give explicit fill/stroke for predictable results.
         rect: {id,type:'rect',x,y,width,height,rx?:cornerRadius}; ellipse:{id,type:'ellipse',cx,cy,rx,ry};
         line:{id,type:'line',x1,y1,x2,y2}; text:{id,type:'text',x,y,text:'<=40 chars',size:1..64};

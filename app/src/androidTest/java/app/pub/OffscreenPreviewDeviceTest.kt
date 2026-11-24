@@ -50,7 +50,9 @@ class OffscreenPreviewDeviceTest {
         try {
             assertTrue(bitmap.width in 1..1280 && bitmap.height in 1..1280)
             assertEquals("Requested viewport aspect ratio", 320.0 / 480.0, bitmap.width.toDouble() / bitmap.height, .01)
-            assertEquals("PUB dark background", 0xFF10130F.toInt(), bitmap.getPixel(0, 0))
+            // A context from before style guides (accent only) is drawn in that accent's dark style guide.
+            val background = app.pub.core.StyleColors.scheme(app.pub.core.StyleGuide.fromLegacyAccent("blue"), true).getValue("background")
+            assertEquals("Blue style guide's dark background", background, bitmap.getPixel(0, 0))
             var accentPixels = 0
             for (y in 0 until bitmap.height step 4) for (x in 0 until bitmap.width step 4) {
                 if (bitmap.getPixel(x, y) == 0xFF9EC8FF.toInt()) accentPixels++

@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -82,10 +81,11 @@ fun NativeGraphic(
     } }
     val actualHighlights = remember(shapes, highlight) { highlight.intersect(shapes.mapTo(HashSet()) { it.id }) }
     val accessibleDescription = description + if (actualHighlights.isEmpty()) "" else ". Highlighted: ${actualHighlights.sorted().joinToString(", ")}."
+    // Theme colour names follow the style guide, its light or dark mode and later style changes; hex colours never change.
     val colors = MaterialTheme.colorScheme
-    val palette = mapOf("primary" to colors.primary.toArgb(), "surface" to colors.surface.toArgb(),
-        "onSurface" to colors.onSurface.toArgb(), "outline" to colors.outline.toArgb(), "transparent" to Color.Transparent.toArgb())
-    val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.SANS_SERIF; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND } }
+    val palette = remember(colors) { GraphicAsset.THEME_COLORS.associateWith { (PubColors.graphicColor(colors, it) ?: Color.Transparent).toArgb() } }
+    val font = LocalPubStyle.current.font
+    val paint = remember(font) { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = PubType.typeface(font); strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND } }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val availableWidth = if (maxWidth.value.isFinite()) maxWidth else 320.dp
         val viewHeight = (availableWidth / (width / height)).coerceIn(120.dp, 360.dp)
@@ -126,7 +126,7 @@ private class DrawingShape(val source: JsonObject, val path: Path?, val id: Stri
 private class ShapeColor(private val paletteKey: String?, private val argb: Int) {
     fun resolve(palette: Map<String, Int>): Int = if (paletteKey != null) palette[paletteKey] ?: argb else argb
 }
-private val PALETTE_KEYS = setOf("primary", "surface", "onSurface", "outline", "transparent")
+private val PALETTE_KEYS = GraphicAsset.THEME_COLORS.toSet()
 private fun shapeColor(value: String) = if (value in PALETTE_KEYS) ShapeColor(value, 0)
     else ShapeColor(null, runCatching { android.graphics.Color.parseColor(value) }.getOrDefault(0))
 

@@ -23,7 +23,7 @@ class GraphicsUiTest {
         compose.onNodeWithTag("prompt-history").assertDoesNotExist()
         compose.onNodeWithTag("back").performClick()
         compose.onNodeWithTag("create-app").performClick()
-        compose.onNodeWithTag("builder-history").performClick()
+        compose.onNodeWithTag("builder-history").performScrollTo().performClick() // Below the draft when a build result is kept.
         compose.onNodeWithTag("prompt-history-screen").assertIsDisplayed()
         compose.onNodeWithTag("back").performClick()
         compose.onNodeWithTag("app-instructions").assertExists()

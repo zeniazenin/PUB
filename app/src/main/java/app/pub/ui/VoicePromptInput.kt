@@ -22,15 +22,22 @@ import android.widget.Toast
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import java.util.concurrent.atomic.AtomicReference
 
-/** Dictation belongs to the builder, never to the generated project's microphone grant. */
+/**
+ * Dictation belongs to the builder, never to the generated project's microphone grant. [label] and [speechPrompt] word
+ * the button and the speech service's prompt for a new idea (the default) or for a change to a draft or saved app.
+ */
 @Composable
 fun VoicePromptButton(
     prompt: String,
     onPromptChange: (String) -> Unit,
     enabled: Boolean,
-    globallyBlocked: Boolean
+    globallyBlocked: Boolean,
+    label: String = "Speak your idea",
+    speechPrompt: String = "Describe the app you want to build",
+    addedMessage: String = "Voice text added. Review or edit it before generating."
 ) {
     val currentPrompt by rememberUpdatedState(prompt)
     val currentChange by rememberUpdatedState(onPromptChange)
@@ -54,15 +61,10 @@ fun VoicePromptButton(
                 if (words.isNullOrEmpty()) {
                     message = "No speech was returned. Try again or type your idea."
                 } else {
-                    val existing = currentPrompt
-                    val separator = if (existing.isBlank() || existing.lastOrNull()?.isWhitespace() == true) "" else "\n"
-                    val combined = existing + separator + words
-                    // Match the builder's existing limit and avoid cutting a UTF-16 surrogate pair.
-                    var end = minOf(combined.length, MAX_DESCRIPTION)
-                    if (end > 0 && end < combined.length && combined[end - 1].isHighSurrogate()) end--
-                    currentChange(combined.substring(0, end))
+                    val combined = joinPrompt(currentPrompt, words)
+                    currentChange(clipPrompt(combined))
                     message = if (combined.length > MAX_DESCRIPTION) "Voice text added up to the description limit. Review it before generating."
-                    else "Voice text added. Review or edit it before generating."
+                    else addedMessage
                 }
             }
         }
@@ -71,13 +73,13 @@ fun VoicePromptButton(
     Column {
         OutlinedButton(
             enabled = enabled && !globallyBlocked && !awaitingResult && prompt.length < MAX_DESCRIPTION,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("voice-input"),
             onClick = {
                 message = null
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Describe the app you want to build")
+                    putExtra(RecognizerIntent.EXTRA_PROMPT, speechPrompt)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                     putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 }
@@ -96,7 +98,7 @@ fun VoicePromptButton(
                 }
             }
         ) {
-            Text(if (awaitingResult) "Waiting for voice input…" else "Speak your idea")
+            Text(if (awaitingResult) "Waiting for voice input…" else label)
         }
         val status = when {
             globallyBlocked -> "Voice input is blocked in Settings → Access."
@@ -110,6 +112,19 @@ fun VoicePromptButton(
 }
 
 private const val MAX_DESCRIPTION = 8000
+
+/** [addition] after [existing], on a new line unless [existing] is empty or already ends in whitespace. Not clipped. */
+internal fun joinPrompt(existing: String, addition: String): String {
+    val separator = if (existing.isBlank() || existing.lastOrNull()?.isWhitespace() == true) "" else "\n"
+    return existing + separator + addition
+}
+
+/** [text] cut to the builder's 8,000-character limit, without splitting a UTF-16 surrogate pair. */
+internal fun clipPrompt(text: String): String {
+    var end = minOf(text.length, MAX_DESCRIPTION)
+    if (end > 0 && end < text.length && text[end - 1].isHighSurrogate()) end--
+    return text.substring(0, end)
+}
 
 /**
  * Dictation for a running app's inputs ([Dictation]): the same system speech service as the builder's voice input,

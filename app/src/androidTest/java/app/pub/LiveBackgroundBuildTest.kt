@@ -76,7 +76,8 @@ class LiveBackgroundBuildTest {
                 var clickNode=readyNode
                 while(clickNode!=null && !clickNode.isClickable)clickNode=clickNode.parent
                 assertNotNull(clickNode);assertTrue(clickNode!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-                await("Notification did not open the builder",15000){find(automation.rootInActiveWindow,"Prompt history")!=null}
+                // With a draft the builder opens on its refine heading; Prompt history follows further down.
+                await("Notification did not open the builder",15000){find(automation.rootInActiveWindow,"Try it, then fine-tune")!=null}
                 main {assertNotNull(controller.draft)}
                 File(app.cacheDir,"background-live-proof-summary.txt").writeText("Live ChatGPT background build passed; screenshot reviews=${reviews.get()}, generation calls=${builds.get()}. Completion notification opened the builder.")
             }

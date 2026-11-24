@@ -2,21 +2,29 @@ package app.pub.ui
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
@@ -35,11 +43,13 @@ import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.core.net.toUri
 import app.pub.HostModel
 import app.pub.builder.BuilderModel
+import app.pub.builder.VisualReview
 import app.pub.core.AppSpec
 import app.pub.core.AppTestSuite
 import app.pub.core.ChecksReport
@@ -51,6 +61,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Content for the host's scrollable builder screen; account/model controls live in Settings. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BuilderScreen(
     builder: BuilderModel,
@@ -58,6 +69,9 @@ fun BuilderScreen(
     onSettings: () -> Unit,
     onHistory: () -> Unit,
     onGenerate: (String) -> Unit = {builder.generate(it)},
+    /** Incremented to bring the change box into view, for example after Request changes in a preview. */
+    revealChanges: Int = 0,
+    onChangesRevealed: () -> Unit = {},
     onPreview: (ProjectBundle) -> Unit
 ) {
     val focus=LocalFocusManager.current
@@ -79,52 +93,81 @@ fun BuilderScreen(
             }
         }
     }
-    Text(builder.editingProject?.let { "Edit ${it.bundle.name}" } ?: "Describe it. Make it yours.", style = MaterialTheme.typography.headlineSmall)
-    Text(if (builder.editingProject != null) "Describe what to change. PUB uses the current app code as context. Preview before saving; your existing data and photos stay on your phone." else "Tell PUB what you need, try the result, and keep it on your phone.")
+    val draft = builder.draft
+    // With a draft the builder is about refining it: the draft first, then what to change, then how it was built.
+    val refining = draft != null
+    val editing = builder.editingProject
+    val idle = builder.busy == null && builder.capturePending == null && !builder.buildInProgress
+    val changeBox = remember { BringIntoViewRequester() }
+    LaunchedEffect(revealChanges) {
+        if (revealChanges > 0) {
+            withFrameNanos {} // Once the screen has been laid out.
+            changeBox.bringIntoView()
+            onChangesRevealed()
+        }
+    }
 
-    TextButton(onClick=onHistory,modifier=Modifier.testTag("builder-history")) { Text("Prompt history") }
+    Text(when {
+        refining -> "Try it, then fine-tune"
+        editing != null -> "Edit ${editing.bundle.name}"
+        else -> "Describe it. Make it yours."
+    }, style = MaterialTheme.typography.headlineSmall)
+    Text(when {
+        refining && editing != null -> "Preview the changes, then type or say what else to adjust. Each change builds on this draft; your saved app stays as it is until you save."
+        refining -> "Preview the app, then type or say what to change. Each change builds on this draft, so you can keep adjusting until it's right."
+        editing != null -> "Describe what to change. PUB uses the current app code as context. Preview before saving; your existing data and photos stay on your phone."
+        else -> "Tell PUB what you need, try the result, and keep it on your phone."
+    })
 
-    if (builder.account == null) {
-        Text("Connect your ChatGPT account in Settings to generate apps. You can write or dictate your idea now.")
-        OutlinedButton(onClick = onSettings) { Text("Open Settings") }
-    } else {
-        val selectedName = builder.models.find { it.id == builder.selectedModel }?.name
-        Text(
-            if (selectedName != null) "Using $selectedName · ChatGPT plan"
-            else "ChatGPT connected · waiting for available models",
-            style = MaterialTheme.typography.bodySmall
-        )
-        TextButton(onClick = onSettings) { Text("Change model in Settings") }
+    // While refining, these follow the change box and the requests instead.
+    if (!refining) BuilderAccount(builder, onSettings, onHistory)
+
+    draft?.let { current ->
+        DraftCard(current, builder, idle, preparing, onPreview,
+            onRetryReview = { startWithContext(builder::retryVisualReview) },
+            onReport = { reporting = ReportTarget.app(ContentReport.Subject.BUILD, current) })
     }
 
     // What the next edit builds on. With a draft, the draft's own research and checks are shown below instead.
-    if (builder.editingProject != null && builder.draft == null) {
+    if (editing != null && draft == null) {
         builder.editingSpec?.let { Text(specNote(it), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("edit-spec-note")) }
             ?: builder.editingSpecNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
-    OutlinedTextField(
-        value = builder.prompt,
-        onValueChange = { builder.prompt = it.take(8000) },
-        label = { Text(if (builder.editingProject != null) "What would you like to change?" else "What would you like to build?") },
-        placeholder = { Text(if (builder.editingProject != null) "Add a reset button and make the result easier to read" else "A tip calculator with bill amount, tip percentage, and number of people") },
-        supportingText = { Text("${builder.prompt.length} / 8,000 characters") },
-        minLines = 4,
-        maxLines = 10,
-        modifier = Modifier.fillMaxWidth().testTag("app-instructions"),
-        enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress
-    )
-    VoicePromptButton(
-        prompt = builder.prompt,
-        onPromptChange = { builder.prompt = it },
-        enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress,
-        globallyBlocked = host.globalBlocked
-    )
-    Button(
-        onClick = { startWithContext(onGenerate) },
-        enabled = builder.account != null && builder.selectedModel.isNotBlank() && !preparing &&
-            builder.prompt.isNotBlank() && builder.busy == null && builder.capturePending == null && !builder.buildInProgress,
-        modifier = Modifier.fillMaxWidth()
-    ) { Text(if (builder.editingProject != null) "Generate changes" else "Generate app") }
+    val change = refining || editing != null
+    Column(Modifier.fillMaxWidth().bringIntoViewRequester(changeBox).testTag("change-box"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        if (refining) Text("Request changes", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = builder.prompt,
+            onValueChange = { builder.prompt = it.take(8000) },
+            label = { Text(when { refining -> "What should change?"; editing != null -> "What would you like to change?"; else -> "What would you like to build?" }) },
+            placeholder = { Text(when {
+                refining -> "Make the total bigger and add a reset button"
+                editing != null -> "Add a reset button and make the result easier to read"
+                else -> "A tip calculator with bill amount, tip percentage, and number of people"
+            }) },
+            supportingText = { Text("${builder.prompt.length} / 8,000 characters") },
+            minLines = if (refining) 2 else 4,
+            maxLines = 10,
+            modifier = Modifier.fillMaxWidth().testTag("app-instructions"),
+            enabled = idle
+        )
+        VoicePromptButton(
+            prompt = builder.prompt,
+            onPromptChange = { builder.prompt = it },
+            enabled = idle,
+            globallyBlocked = host.globalBlocked,
+            label = if (change) "Speak a change" else "Speak your idea",
+            speechPrompt = if (change) "Say what to change" else "Describe the app you want to build",
+            addedMessage = if (refining) "Voice text added. Review it, then tap Apply changes." else "Voice text added. Review or edit it before generating."
+        )
+        if (refining && idle) QuickFixes(builder.checksReport, builder.visualReview, builder.prompt) { builder.prompt = clipPrompt(joinPrompt(builder.prompt, it)) }
+        Button(
+            onClick = { startWithContext(onGenerate) },
+            enabled = builder.account != null && builder.selectedModel.isNotBlank() && !preparing && builder.prompt.isNotBlank() && idle,
+            modifier = Modifier.fillMaxWidth().testTag("generate")
+        ) { Text(when { refining -> "Apply changes"; editing != null -> "Generate changes"; else -> "Generate app" }) }
+        if (refining) Text("Builds a new version from this draft. If the build fails or you cancel it, this draft is kept.", style = MaterialTheme.typography.bodySmall)
+    }
 
     if (builder.imageToolsUnavailable) Text("Native illustrations and icons are available. PNG generation is unavailable with this ChatGPT connection.", style=MaterialTheme.typography.bodySmall)
     if(builder.buildInProgress) Text("You can switch apps. PUB will notify you when the build is ready.",style=MaterialTheme.typography.bodySmall)
@@ -133,6 +176,11 @@ fun BuilderScreen(
         TextButton(onClick={notificationContext.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,notificationContext.packageName))}) {Text("Enable build notifications")}
     }
     BuilderStatus(builder)
+
+    if (refining) {
+        RequestTrail(builder.draftRequests, startsWithIdea = editing == null)
+        BuilderAccount(builder, onSettings, onHistory)
+    }
 
     builder.researchBrief?.let { brief -> ResearchCard(brief, onReport = { reporting = ReportTarget.research(brief) }) }
     builder.researchNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -146,25 +194,108 @@ fun BuilderScreen(
         } }
     }
     builder.visualReviewError?.let { Text(it,style=MaterialTheme.typography.bodySmall) }
-    if(builder.hasBuildResult && builder.draft==null) TextButton(onClick=builder::clearDraft,enabled=builder.busy==null) {Text("Dismiss build result")}
-    builder.draft?.let { draft ->
-        Card {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    AppIconTile(draft.name, draft.icon?.let { draft.assets[it]?.asJsonObject }, size = 64.dp)
-                    Text(draft.name, style = MaterialTheme.typography.titleLarge)
-                }
-                Text(draft.description)
-                if (!draft.assets.isEmpty) Text("Graphics: ${draft.assets.size()} local assets")
-                Text("Requested access: " + draft.capabilities.joinToString().ifBlank { "none" })
-                BehaviorChecksSummary(builder.draftTests, builder.checksReport, builder.checksError,
-                    running = builder.busy != null || builder.buildInProgress)
-                Button(onClick = { onPreview(draft) }, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Preview app") }
-                if(builder.visualReviewError!=null) TextButton(onClick={startWithContext(builder::retryVisualReview)},enabled=builder.busy==null && !preparing) {Text("Retry visual review")}
-                TextButton(onClick = builder::clearDraft, enabled = builder.busy == null && builder.capturePending == null && !builder.buildInProgress) { Text("Discard draft") }
-                TextButton(onClick = { reporting = ReportTarget.app(ContentReport.Subject.BUILD, draft) }, modifier = Modifier.testTag("report-build")) { Text("Report content") }
+    if(builder.hasBuildResult && draft==null) TextButton(onClick=builder::clearDraft,enabled=builder.busy==null) {Text("Dismiss build result")}
+}
+
+/** Prompt history and the ChatGPT connection the next build uses. */
+@Composable
+private fun BuilderAccount(builder: BuilderModel, onSettings: () -> Unit, onHistory: () -> Unit) {
+    TextButton(onClick=onHistory,modifier=Modifier.testTag("builder-history")) { Text("Prompt history") }
+    if (builder.account == null) {
+        Text("Connect your ChatGPT account in Settings to generate apps. You can write or dictate your idea now.")
+        OutlinedButton(onClick = onSettings) { Text("Open Settings") }
+    } else {
+        val selectedName = builder.models.find { it.id == builder.selectedModel }?.name
+        Text(
+            if (selectedName != null) "Using $selectedName · ChatGPT plan"
+            else "ChatGPT connected · waiting for available models",
+            style = MaterialTheme.typography.bodySmall
+        )
+        TextButton(onClick = onSettings) { Text("Change model in Settings") }
+    }
+}
+
+/** The current draft: what it is, what it may use and how its checks went, with Preview as its main action. */
+@Composable
+private fun DraftCard(draft: ProjectBundle, builder: BuilderModel, idle: Boolean, preparing: Boolean, onPreview: (ProjectBundle) -> Unit,
+    onRetryReview: () -> Unit, onReport: () -> Unit) {
+    Card(Modifier.fillMaxWidth().testTag("draft-card")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                AppIconTile(draft.name, draft.icon?.let { draft.assets[it]?.asJsonObject }, size = 64.dp)
+                Text(draft.name, style = MaterialTheme.typography.titleLarge)
             }
+            Text(draft.description)
+            if (!draft.assets.isEmpty) Text("Graphics: ${draft.assets.size()} local assets")
+            Text("Requested access: " + draft.capabilities.joinToString().ifBlank { "none" })
+            BehaviorChecksSummary(builder.draftTests, builder.checksReport, builder.checksError,
+                running = builder.busy != null || builder.buildInProgress)
+            Button(onClick = { onPreview(draft) }, enabled = idle) { Text("Preview app") }
+            if(builder.visualReviewError!=null) TextButton(onClick=onRetryReview,enabled=builder.busy==null && !preparing) {Text("Retry visual review")}
+            TextButton(onClick = builder::clearDraft, enabled = idle) { Text("Discard draft") }
+            TextButton(onClick = onReport, modifier = Modifier.testTag("report-build")) { Text("Report content") }
         }
+    }
+}
+
+/**
+ * One-tap starting points for the next change when the draft's own checks found something: the behavior checks that
+ * still fail, or the issues the latest visual review still sees. Each adds editable text to the change box; nothing
+ * is sent until Apply changes.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QuickFixes(report: ChecksReport?, review: String?, prompt: String, onAdd: (String) -> Unit) {
+    val checks = report?.failures()?.takeIf { it.isNotEmpty() }?.let(::failingChecksRequest)
+    val screen = review?.let(::visualIssuesRequest)
+    if (checks == null && screen == null) return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Quick fixes", style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            checks?.let { SuggestionChip(onClick = { onAdd(it) }, label = { Text("Fix failing checks") }, enabled = it !in prompt, modifier = Modifier.testTag("fix-checks")) }
+            screen?.let { SuggestionChip(onClick = { onAdd(it) }, label = { Text("Fix visual issues") }, enabled = it !in prompt, modifier = Modifier.testTag("fix-visual")) }
+        }
+    }
+}
+
+private const val QUICK_FIX_CHARS = 2000
+
+/**
+ * A change request naming the draft's failing behavior checks and why they failed. A change returns an updated suite,
+ * so it asks for the app to be fixed and the checks to stay, as automatic behavior repairs do.
+ */
+internal fun failingChecksRequest(failures: List<ChecksReport.Entry>): String =
+    ChecksReport.clip("Fix the app so these behavior checks pass. Keep the checks themselves unchanged:\n" + failures.joinToString("\n") { "- ${it.name}: ${it.detail}" }, QUICK_FIX_CHARS)
+
+/** A change request with the latest visual review's findings; null unless that review asked for fixes. */
+internal fun visualIssuesRequest(review: String): String? {
+    if (review.lineSequence().firstOrNull()?.contains(VisualReview.FIXES_NEEDED) != true) return null
+    val findings = review.substringAfter("\n\n").substringBefore("\n\n" + VisualReview.SCOPE_NOTE).trim()
+    return if (findings.isEmpty()) null else ChecksReport.clip("Fix these issues from the visual review:\n$findings", QUICK_FIX_CHARS)
+}
+
+private const val TRAIL_PREVIEW = 4
+private const val TRAIL_LINES = 3
+
+/** What the user asked for to get the current draft, so the cleared change box never hides it. */
+@Composable
+private fun RequestTrail(requests: List<String>, startsWithIdea: Boolean) {
+    if (requests.isEmpty()) return
+    var expanded by rememberSaveable(requests.first()) { mutableStateOf(false) }
+    val hidden = if (expanded) 0 else (requests.size - TRAIL_PREVIEW).coerceAtLeast(0)
+    val labelStyle = SpanStyle(fontWeight = FontWeight.SemiBold)
+    Column(Modifier.fillMaxWidth().testTag("request-trail"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("What you asked for", style = MaterialTheme.typography.titleSmall)
+        if (hidden > 0) Text("$hidden earlier ${if (hidden == 1) "change" else "changes"}", style = MaterialTheme.typography.bodySmall)
+        requests.drop(hidden).forEachIndexed { offset, request ->
+            val index = hidden + offset
+            val label = if (startsWithIdea && index == 0) "Idea" else "Change ${if (startsWithIdea) index else index + 1}"
+            Text(buildAnnotatedString { withStyle(labelStyle) { append(label) }; append("  ·  "); append(request) },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else TRAIL_LINES, overflow = TextOverflow.Ellipsis)
+        }
+        val long = requests.any { it.length > 160 || it.count { c -> c == '\n' } >= TRAIL_LINES }
+        if (requests.size > TRAIL_PREVIEW || long) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Show less" else "Show all") }
     }
 }
 

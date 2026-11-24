@@ -76,7 +76,8 @@ class BuildDraftStoreTest {
         draftRequest = "Make the timer calmer.", draftModel = "astra-test", repairPass = 1,
         message = "Review ready", visualReview = "The labels are readable.", visualReviewError = null, running = false,
         research = research(), tests = tests(), checks = checks(),
-        originalRequest = "A practice timer with start and stop.\nKeep café 🎸 text.", uiPlan = plan()
+        originalRequest = "A practice timer with start and stop.\nKeep café 🎸 text.", uiPlan = plan(),
+        requests = listOf("A practice timer with start and stop.\nKeep café 🎸 text.", "Make the timer calmer.")
     )
     private fun assertSameContent(expected: BuildDraftSnapshot, actual: BuildDraftSnapshot) {
         assertEquals(expected.prompt, actual.prompt); assertEquals(expected.sessionId, actual.sessionId)
@@ -91,6 +92,7 @@ class BuildDraftStoreTest {
         assertEquals(expected.tests?.toJson(), actual.tests?.toJson()); assertEquals(expected.checks?.toJson(), actual.checks?.toJson())
         assertEquals(expected.originalRequest, actual.originalRequest)
         assertEquals(expected.uiPlan?.toJson(), actual.uiPlan?.toJson())
+        assertEquals(expected.requests, actual.requests)
     }
 
     @Test fun editingBaselineDraftAndGeneratedAssetsSurviveReload() {
@@ -98,7 +100,7 @@ class BuildDraftStoreTest {
         val expected = snapshot(); store.write(expected)
         assertSameContent(expected, BuildDraftStore(context).read()!!)
         val root = JsonParser.parseString(file.readText()).asJsonObject
-        assertEquals(setOf("version", "prompt", "sessionId", "editingProject", "draft", "draftHistoryId", "draftRequest", "draftModel", "repairPass", "message", "visualReview", "visualReviewError", "running", "research", "tests", "checks", "originalRequest", "uiPlan"), root.keySet())
+        assertEquals(setOf("version", "prompt", "sessionId", "editingProject", "draft", "draftHistoryId", "draftRequest", "draftModel", "repairPass", "message", "visualReview", "visualReviewError", "running", "research", "tests", "checks", "originalRequest", "uiPlan", "requests"), root.keySet())
         assertEquals(BuildDraftStore.VERSION, root["version"].asInt)
         assertEquals(setOf("id", "bundle"), root.getAsJsonObject("editingProject").keySet())
     }
@@ -113,10 +115,10 @@ class BuildDraftStoreTest {
         assertNull(BuildDraftStore(context).read()!!.research)
         assertTrue(JsonParser.parseString(file.readText()).asJsonObject["research"].isJsonNull)
         // A file written before research existed: version 1 and no research, tests, checks or original request fields.
-        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("research"); remove("tests"); remove("checks"); remove("originalRequest"); remove("uiPlan"); addProperty("version", 1) }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("research"); remove("tests"); remove("checks"); remove("originalRequest"); remove("uiPlan"); remove("requests"); addProperty("version", 1) }
         file.writeText(legacy.toString())
         val loaded = BuildDraftStore(context).read()!!
-        assertSameContent(withoutResearch.copy(tests = null, checks = null, originalRequest = null, uiPlan = null), loaded)
+        assertSameContent(withoutResearch.copy(tests = null, checks = null, originalRequest = null, uiPlan = null, requests = emptyList()), loaded)
         store.write(expected) // A version 1 file can be replaced by the current version.
         assertSameContent(expected, store.read()!!)
     }
@@ -134,9 +136,9 @@ class BuildDraftStoreTest {
         val noSuite = expected.copy(tests = null, checks = null); store.write(noSuite)
         assertSameContent(noSuite, BuildDraftStore(context).read()!!)
         // A file written before behavior checks existed: version 2, research but no tests, checks or original request.
-        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("tests"); remove("checks"); remove("originalRequest"); remove("uiPlan"); addProperty("version", 2) }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("tests"); remove("checks"); remove("originalRequest"); remove("uiPlan"); remove("requests"); addProperty("version", 2) }
         file.writeText(legacy.toString())
-        assertSameContent(noSuite.copy(originalRequest = null, uiPlan = null), BuildDraftStore(context).read()!!)
+        assertSameContent(noSuite.copy(originalRequest = null, uiPlan = null, requests = emptyList()), BuildDraftStore(context).read()!!)
         store.write(expected) // A version 2 file can be replaced by the current version.
         assertSameContent(expected, store.read()!!)
     }
@@ -189,15 +191,15 @@ class BuildDraftStoreTest {
         assertTrue(JsonParser.parseString(file.readText()).asJsonObject["originalRequest"].isJsonNull)
         // A file written before the original request was kept: version 3 with research, tests and checks.
         store.write(expected)
-        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("originalRequest"); remove("uiPlan"); addProperty("version", 3) }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("originalRequest"); remove("uiPlan"); remove("requests"); addProperty("version", 3) }
         file.writeText(legacy.toString())
-        assertSameContent(withoutOriginal.copy(uiPlan = null), BuildDraftStore(context).read()!!)
+        assertSameContent(withoutOriginal.copy(uiPlan = null, requests = emptyList()), BuildDraftStore(context).read()!!)
         store.write(expected) // A version 3 file can be replaced by the current version.
         assertSameContent(expected, store.read()!!)
         // A file written before UI plans: version 4 with the original request but no plan.
-        val versionFour = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("uiPlan"); addProperty("version", 4) }
+        val versionFour = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("uiPlan"); remove("requests"); addProperty("version", 4) }
         file.writeText(versionFour.toString())
-        assertSameContent(expected.copy(uiPlan = null), BuildDraftStore(context).read()!!)
+        assertSameContent(expected.copy(uiPlan = null, requests = emptyList()), BuildDraftStore(context).read()!!)
         store.write(expected)
         assertSameContent(expected, store.read()!!)
         // Bounds, type and version field sets are enforced like every other field.
@@ -208,6 +210,7 @@ class BuildDraftStoreTest {
             valid.deepCopy().apply { remove("originalRequest") },
             valid.deepCopy().apply { addProperty("version", 3) },
             valid.deepCopy().apply { addProperty("version", 4) },
+            valid.deepCopy().apply { addProperty("version", 5) },
             valid.deepCopy().apply { addProperty("uiPlan", "{}") },
             valid.deepCopy().apply { getAsJsonObject("uiPlan").addProperty("code", "x") }).forEach { root ->
             val bytes = root.toString().toByteArray()
@@ -218,6 +221,38 @@ class BuildDraftStoreTest {
         store.clear()
         assertThrows(BuildDraftStoreException::class.java) { store.write(expected.copy(originalRequest = "x".repeat(8001))) }
         assertFalse(file.exists())
+    }
+
+    @Test fun draftRequestsRoundTripAndVersionFiveSnapshotsStillLoad() {
+        val store = BuildDraftStore(context); val expected = snapshot(); store.write(expected)
+        assertEquals(expected.requests, BuildDraftStore(context).read()!!.requests)
+        val root = JsonParser.parseString(file.readText()).asJsonObject
+        assertEquals(expected.requests, root.getAsJsonArray("requests").map { it.asString })
+        val none = expected.copy(requests = emptyList()); store.write(none)
+        assertEquals("[]", JsonParser.parseString(file.readText()).asJsonObject["requests"].toString())
+        assertSameContent(none, BuildDraftStore(context).read()!!)
+        // A file written before draft requests were kept: version 5 with a UI plan but no requests.
+        store.write(expected)
+        val versionFive = JsonParser.parseString(file.readText()).asJsonObject.apply { remove("requests"); addProperty("version", 5) }
+        file.writeText(versionFive.toString())
+        assertSameContent(none, BuildDraftStore(context).read()!!)
+        store.write(expected) // A version 5 file can be replaced by the current version.
+        assertSameContent(expected, store.read()!!)
+        // Type, bounds and field sets are enforced like every other field.
+        val valid = JsonParser.parseString(file.readText()).asJsonObject
+        listOf(valid.deepCopy().apply { addProperty("requests", "Make it calmer") },
+            valid.deepCopy().apply { add("requests", JsonArray().apply { add(5) }) },
+            valid.deepCopy().apply { add("requests", JsonArray().apply { add(JsonObject()) }) },
+            valid.deepCopy().apply { add("requests", JsonArray().apply { add("") }) },
+            valid.deepCopy().apply { add("requests", JsonArray().apply { add("x".repeat(8001)) }) },
+            valid.deepCopy().apply { add("requests", JsonArray().apply { repeat(BuildDraftStore.MAX_REQUESTS + 1) { add("Change $it") } }) },
+            valid.deepCopy().apply { remove("requests") }).forEach { invalid ->
+            val bytes = invalid.toString().toByteArray()
+            file.writeBytes(bytes)
+            assertThrows(BuildDraftStoreException::class.java) { store.read() }
+            assertArrayEquals(bytes, file.readBytes())
+        }
+        store.clear(); assertNull(store.read())
     }
 
     @Test fun partialCreateAndTunerIdentityRoundTripAndClear() {
@@ -269,14 +304,17 @@ class BuildDraftStoreTest {
             valid.copy(draftModel = "x".repeat(201)), valid.copy(message = "x".repeat(1001)),
             valid.copy(visualReview = "x".repeat(6001)), valid.copy(visualReviewError = "x".repeat(6001)),
             valid.copy(repairPass = -1), valid.copy(repairPass = 3), valid.copy(sessionId = "../../other"),
-            valid.copy(draftHistoryId = "guitar-tuner"), valid.copy(editingProject = SavedProject("../other", bundle("Other")))
+            valid.copy(draftHistoryId = "guitar-tuner"), valid.copy(editingProject = SavedProject("../other", bundle("Other"))),
+            valid.copy(requests = listOf("   ")), valid.copy(requests = listOf("x".repeat(8001))),
+            valid.copy(requests = List(BuildDraftStore.MAX_REQUESTS + 1) { "Change $it" })
         )
         invalid.forEach { rejected ->
             assertThrows(BuildDraftStoreException::class.java) { store.write(rejected) }
             assertArrayEquals(bytes, file.readBytes())
         }
         val boundary = valid.copy(prompt = "p".repeat(8000), draftRequest = "r".repeat(8000), draftModel = "m".repeat(200),
-            repairPass = 2, message = "m".repeat(1000), visualReview = "v".repeat(6000), visualReviewError = "e".repeat(6000))
+            repairPass = 2, message = "m".repeat(1000), visualReview = "v".repeat(6000), visualReviewError = "e".repeat(6000),
+            requests = List(BuildDraftStore.MAX_REQUESTS) { "r".repeat(8000) })
         store.write(boundary); assertSameContent(boundary, store.read()!!)
     }
 

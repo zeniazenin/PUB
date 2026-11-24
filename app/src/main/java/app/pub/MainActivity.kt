@@ -103,6 +103,17 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
             model.closeProject()
         }
     }
+    // Asks the builder to bring its change box into view once it is shown again.
+    var revealChanges by remember { mutableIntStateOf(0) }
+    // A builder preview of the current draft returns to the builder's change box.
+    val requestChanges: (() -> Unit)? = if (model.preview && destination == "builder") ({
+        if (!model.savingPreview) { model.closeProject(); revealChanges++ }
+    }) else null
+    // A saved app can be changed from its own screen, unless the builder holds another app's build.
+    val runningSaved = if (model.projectOpen && !model.preview) model.projects.find { it.id == model.projectId } else null
+    val editRunning: (() -> Unit)? = runningSaved
+        ?.takeIf { !builder.buildInProgress && (!builder.hasBuildResult || builder.editingProject?.id == it.id) }
+        ?.let { project -> { model.closeProject(); builder.beginEdit(project); destination = "builder"; revealChanges++ } }
     val openSettings = { settingsReturn = destination; destination = "settings" }
     val back = {
         if (model.projectOpen) closeProject()
@@ -145,7 +156,7 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
         Surface(Modifier.fillMaxSize(), color = colors.background) {
             Column(Modifier.safeDrawingPadding().fillMaxSize()) {
                 if (model.projectOpen) {
-                    RunningAppScreen(model, closeProject) {
+                    RunningAppScreen(model, closeProject, editRunning, requestChanges) {
                         model.savePreview { historyId, saved ->
                             builder.markSaved(historyId, saved.id, saved.bundle.name)
                             builder.beginEdit(saved)
@@ -180,7 +191,8 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                                 onDelete = { deleteTarget = it },
                                 onReport = { reportTarget = ReportTarget.app(ContentReport.Subject.APP, it.bundle) }) { builder.beginCreate(); destination = "builder" }
                             "builder" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                                BuilderScreen(builder, model, openSettings, { historyReturn = "builder"; historyProject = builder.editingProject?.id; historySession=builder.historySessionId; builder.refreshHistory(); destination = "history" }, onGenerate=requestBuild) { model.previewProject(it, builder.editingProject, builder.draftHistoryId) }
+                                BuilderScreen(builder, model, openSettings, { historyReturn = "builder"; historyProject = builder.editingProject?.id; historySession=builder.historySessionId; builder.refreshHistory(); destination = "history" }, onGenerate=requestBuild,
+                                    revealChanges = revealChanges, onChangesRevealed = { revealChanges = 0 }) { model.previewProject(it, builder.editingProject, builder.draftHistoryId) }
                             }
                             "history" -> PromptHistoryScreen(builder, historyProject, historySession)
                             "inventory" -> HardwareInventoryScreen()
@@ -231,14 +243,19 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
     }
 }
 
+/**
+ * [edit] (a saved app) opens the builder to change it; [requestChanges] (a builder preview) returns to the builder's
+ * change box. Both are absent where they do not apply.
+ */
 @Composable
-private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, save: () -> Unit) {
+private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, edit: (() -> Unit)?, requestChanges: (() -> Unit)?, save: () -> Unit) {
     // Pinned host controls stay outside the generated UI and cannot be hidden by an app.
     Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=8.dp), verticalAlignment=Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(model.projectName, style=MaterialTheme.typography.titleLarge, maxLines=1, overflow=TextOverflow.Ellipsis)
             if(model.preview) Text("Preview", color=MaterialTheme.colorScheme.primary, style=MaterialTheme.typography.labelMedium)
         }
+        edit?.let { TextButton(onClick=it, modifier=Modifier.testTag("edit-app")) { Text("Edit") } }
         TextButton(onClick=close, enabled=!model.savingPreview, modifier=Modifier.testTag("close-app").semantics { contentDescription="Close app" }) { Text("✕  Close") }
     }
     HorizontalDivider()
@@ -253,10 +270,13 @@ private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, sa
             TextButton(onClick=model::stop) { Text("Stop") }
         }
     }
-    if (model.preview) Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-        Text(if (model.previewEditTarget != null) "Save changes updates the app code. Your existing saved data, files and photos are kept; changes made in this preview are discarded." else "Try it before saving. Closing discards preview changes, including its files.",modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
-        Button(onClick=save,enabled=model.ui!=null && model.failure==null && !model.savingPreview,modifier=Modifier.testTag("save-preview")) {
-            Text(if (model.savingPreview) "Saving…" else if (model.previewEditTarget != null) "Save changes" else "Save locally")
+    if (model.preview) Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        Text(if (model.previewEditTarget != null) "Save changes updates the app code. Your existing saved data, files and photos are kept; changes made in this preview are discarded." else "Try it before saving. Closing discards preview changes, including its files.",style=MaterialTheme.typography.bodySmall)
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp,Alignment.End)) {
+            requestChanges?.let { OutlinedButton(onClick=it,enabled=!model.savingPreview,modifier=Modifier.testTag("request-changes")) { Text("Request changes") } }
+            Button(onClick=save,enabled=model.ui!=null && model.failure==null && !model.savingPreview,modifier=Modifier.testTag("save-preview")) {
+                Text(if (model.savingPreview) "Saving…" else if (model.previewEditTarget != null) "Save changes" else "Save locally")
+            }
         }
     }
     key(model.projectId) {

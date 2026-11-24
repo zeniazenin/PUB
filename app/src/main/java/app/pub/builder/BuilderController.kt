@@ -96,6 +96,11 @@ class BuilderController(private val application: Application, private val backen
         const val SPEC_NOT_SAVED = "App saved locally. Its research and behavior checks could not be stored, so its next edit researches the change on its own."
         const val SPEC_UNREADABLE = "This app's saved research and checks could not be read, so this edit researches the change on its own."
         const val NO_CHECKS = "No behavior checks were provided with this build."
+        /** [earlier] followed by [request]; past the limit the first request and the latest changes are kept. */
+        fun withRequest(earlier:List<String>,request:String):List<String> {
+            val all=earlier+request
+            return if(all.size<=BuildDraftStore.MAX_REQUESTS) all else listOf(all.first())+all.takeLast(BuildDraftStore.MAX_REQUESTS-1)
+        }
         const val CHECKS_DID_NOT_RUN = "Behavior checks could not run."
         /** Prompt-history summary of how a build was researched; null when research was skipped. */
         fun researchSummary(brief:ResearchBrief?,note:String?,updated:Boolean):String? {
@@ -131,6 +136,8 @@ class BuilderController(private val application: Application, private val backen
     // The request the current draft's app was first built from; set when a draft is committed and persisted with it.
     private var draftOrigin: String? = null
     private fun draftOriginalRequest() = draftOrigin?.takeIf { it.isNotBlank() } ?: draftRequest
+    // The user's requests that produced the current draft, persisted with it; empty without a draft.
+    override var draftRequests by mutableStateOf(emptyList<String>()); private set
     override var editingProject by mutableStateOf<SavedProject?>(null); private set
     override var editingSpec by mutableStateOf<AppSpec?>(null); private set
     override var editingSpecNote by mutableStateOf<String?>(null); private set
@@ -187,7 +194,9 @@ class BuilderController(private val application: Application, private val backen
                 val saved=withContext(Dispatchers.IO) {draftStore.read()}
                 saved?.let {restore(it)}
                 if(saved?.running==true) {
-                    message="The previous build was interrupted. Its latest draft has been kept. Generate again to retry."
+                    // A build interrupted before its draft was ready still has its request in the box; after that it was cleared.
+                    message=if(prompt.isNotBlank()) "The previous build was interrupted. Its latest draft has been kept. Generate again to retry."
+                        else "The previous build was interrupted. Its latest draft has been kept. Preview it, retry its review or describe a change."
                     visualReviewError="Build interrupted before completion. No automatic retry was sent."
                     hasBuildResult=true
                     persistDraft(false)
@@ -218,6 +227,9 @@ class BuilderController(private val application: Application, private val backen
     }
     private fun restore(saved:BuildDraftSnapshot) {
         prompt=saved.prompt;historySessionId=saved.sessionId;editingProject=saved.editingProject
+        // Builds before version 6 left the request that built the draft in the box; it is part of the draft, so the
+        // box starts empty for the next change.
+        if(saved.draft!=null && saved.prompt==saved.draftRequest) prompt=""
         draft=saved.draft;draftHistoryId=saved.draftHistoryId;draftRequest=saved.draftRequest
         draftModel=saved.draftModel;draftRepairPass=saved.repairPass;message=saved.message
         visualReview=saved.visualReview;visualReviewError=saved.visualReviewError
@@ -226,6 +238,13 @@ class BuilderController(private val application: Application, private val backen
         uiPlan=saved.uiPlan;uiPlanNote=null;committedPlan=saved.uiPlan
         checksError=saved.checks?.takeUnless { it.allPassed() }?.let { checksStillFail(it) }
         draftOrigin=saved.originalRequest?.takeIf { saved.draft!=null }
+        // Drafts saved before their requests were kept (version 5 and older) start the list with what is known.
+        draftRequests=when {
+            saved.draft==null -> emptyList()
+            saved.requests.isNotEmpty() -> saved.requests
+            saved.editingProject==null -> listOfNotNull((saved.originalRequest ?: saved.draftRequest).takeIf { it.isNotBlank() })
+            else -> listOfNotNull(saved.draftRequest.takeIf { it.isNotBlank() })
+        }
         hasBuildResult=saved.draft!=null || saved.running || saved.message!=null
         loadSpec(saved.editingProject) // The edited app's spec is read again from its own file, never from the draft.
     }
@@ -234,7 +253,7 @@ class BuilderController(private val application: Application, private val backen
         check(draftStoreFailure==null) {draftStoreFailure!!}
         val snapshot=BuildDraftSnapshot(prompt,historySessionId,editingProject,draft,draftHistoryId,draftRequest,draftModel,
             draftRepairPass,message,visualReview,visualReviewError,running,committedResearch,draftTests,checksReport,
-            draftOrigin?.takeIf { draft!=null && it.isNotBlank() },committedPlan)
+            draftOrigin?.takeIf { draft!=null && it.isNotBlank() },committedPlan,if(draft!=null) draftRequests else emptyList())
         draftMutex.withLock {withContext(Dispatchers.IO) {draftStore.write(snapshot)}}
     }
     private suspend fun settleBuild() {
@@ -296,7 +315,7 @@ class BuilderController(private val application: Application, private val backen
                         historySessionId=java.util.UUID.randomUUID().toString();prompt=""
                         visualReview=null;visualReviewError=null;researchBrief=null;researchNote=null;committedResearch=null
                         draftTests=null;checksReport=null;checksError=null;message=savedMessage
-                        uiPlan=null;uiPlanNote=null;committedPlan=null
+                        uiPlan=null;uiPlanNote=null;committedPlan=null;draftRequests=emptyList()
                     }
                 }
             } catch (error: CancellationException) {throw error}
@@ -439,6 +458,8 @@ class BuilderController(private val application: Application, private val backen
         val draftResearch=researchBrief;val draftResearchNote=researchNote;val draftPlan=uiPlan;val draftPlanNote=uiPlanNote
         // A build on the current draft builds on that draft's own original request, research and checks.
         val draftBasis=if(draft!=null) EditBasis(draftOriginalRequest(),committedResearch,draftTests,committedPlan) else null
+        // A change to the current draft continues its requests; any other build starts a new list.
+        val earlierRequests=if(draft!=null) draftRequests else emptyList()
         val pendingSpec=specLoad
         operation(BUILDING) {
             check(model.isNotBlank()) { "Select an available model first" }
@@ -479,8 +500,12 @@ class BuilderController(private val application: Application, private val backen
                 draft=generated.bundle;draftHistoryId=historyId;draftRequest=request;draftModel=model;draftRepairPass=0;committedResearch=brief;committedPlan=plan
                 draftOrigin=basis?.originalRequest?.takeIf { it.isNotBlank() } ?: request
                 draftTests=generated.tests;checksReport=null;checksError=null
+                draftRequests=withRequest(earlierRequests,request)
                 visualReview=null;visualReviewError=null
                 committed=true
+                // The request is now part of the draft (and its history), so the box is ready for the next change.
+                // A failed or cancelled build never gets here and keeps its text for a retry.
+                if(prompt==request) prompt=""
                 if(generated.tests?.isEmpty==true) recordDetail(historyId,NO_CHECKS,PromptHistoryStore::recordChecks)
                 // Behavior checks (and any repairs they need) come before the screenshot of the resulting draft.
                 capturePending=checkBehavior(VisualCaptureRequest(generated.bundle,request,model,context,historyId!!,0,base?.id,session))
@@ -512,7 +537,7 @@ class BuilderController(private val application: Application, private val backen
         val hadResult=hasBuildResult || draftStoreFailure!=null
         draft=null;draftHistoryId=null;capturePending=null;visualReview=null;visualReviewError=null;hasBuildResult=false;message=null
         researchBrief=null;researchNote=null;committedResearch=null;draftTests=null;checksReport=null;checksError=null;draftOrigin=null
-        uiPlan=null;uiPlanNote=null;committedPlan=null
+        uiPlan=null;uiPlanNote=null;committedPlan=null;draftRequests=emptyList()
         if(backgroundManaged) {
             if(hadResult) busy="Discarding build result..."
             scope.launch {

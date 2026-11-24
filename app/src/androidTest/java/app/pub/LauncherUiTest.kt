@@ -46,9 +46,10 @@ class LauncherUiTest {
             val builder = ViewModelProvider(compose.activity)[app.pub.builder.BuilderModel::class.java]
             compose.waitUntil(30000) { builder.busy == null }
             compose.onNodeWithTag("app-instructions").performTextInput("A garden watering checklist")
-            compose.onNodeWithText("Speak your idea").performScrollTo().assertIsNotEnabled()
+            // By tag: the button reads "Speak a change" when PUB holds a build result, which Create app then shows.
+            compose.onNodeWithTag("voice-input").performScrollTo().assertIsNotEnabled()
             compose.runOnIdle { host.blockGlobally(false) }
-            compose.onNodeWithText("Speak your idea").assertIsEnabled()
+            compose.onNodeWithTag("voice-input").assertIsEnabled()
             compose.onNodeWithText("Continue with ChatGPT").assertDoesNotExist()
             compose.runOnIdle { assertFalse(host.projectOpen);assertNull(host.isolatedUid) }
         } finally { compose.runOnIdle { host.blockGlobally(oldBlock) } }

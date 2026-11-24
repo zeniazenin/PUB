@@ -36,6 +36,11 @@ interface BuilderState {
     val message:String?
     val draft:ProjectBundle?
     val draftHistoryId:String?
+    /**
+     * The user's requests that produced [draft], oldest first: the build it started from (a new app's idea, or the first
+     * change to a saved app), then each change made to the draft. Automatic repairs are not included; empty without a draft.
+     */
+    val draftRequests:List<String>
     /** Research for the build in progress or the current draft; null when research was skipped or failed. */
     val researchBrief:app.pub.core.ResearchBrief?
     /** Short notice when research fell back to model knowledge or could not complete. */

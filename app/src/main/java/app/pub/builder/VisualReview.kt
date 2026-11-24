@@ -21,6 +21,8 @@ class VisualReview(private val auth: ChatGptAuth) {
         formatDecision(assess(model, request, bundle, pngBytes))
 
     companion object {
+        /** In a formatted review's first line when the screenshot showed issues to fix. */
+        const val FIXES_NEEDED = "visible fixes needed"
         const val SCOPE_NOTE = "Initial visible screen only. This review is advisory; it does not test interactions, calculations, scrolling, permissions, hardware, saved data or other screen states."
 
         /**
@@ -88,7 +90,7 @@ class VisualReview(private val auth: ChatGptAuth) {
             append("Visual review — ")
             append(when (decision.status) {
                 "pass" -> "no visible fixes identified"
-                "fix" -> "visible fixes needed"
+                "fix" -> FIXES_NEEDED
                 else -> "screenshot could not be verified"
             })
             append("\n\n").append(decision.summary.trim())

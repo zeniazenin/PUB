@@ -50,13 +50,16 @@ class LauncherEditingTest {
         return project
     }
     @Test fun longPressEditsWithCodeContextAndDeletionRequiresConfirmation() {
+        val builder=ViewModelProvider(compose.activity)[BuilderModel::class.java]
+        compose.waitUntil(30000) { builder.busy == null }
+        org.junit.Assume.assumeFalse("PUB holds a build result on this phone, which Edit app opens instead; save or discard it first",
+            builder.hasBuildResult || builder.buildInProgress)
         val project=fixture()
         try {
             compose.onNodeWithTag("app-${project.id}").performTouchInput { longClick() }
             compose.onNodeWithText("Edit app").assertIsDisplayed()
             compose.onNodeWithText("Delete app").assertIsDisplayed()
             compose.onNodeWithTag("edit-app-${project.id}").performClick()
-            val builder=ViewModelProvider(compose.activity)[BuilderModel::class.java]
             compose.onNodeWithText("What would you like to change?").assertIsDisplayed()
             compose.runOnIdle {
                 assertEquals(project.id,builder.editingProject!!.id)

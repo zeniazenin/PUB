@@ -42,17 +42,17 @@ fun PromptHistoryScreen(builder: BuilderModel, projectId: String? = null, sessio
 private fun HistoryRequest(entry: PromptHistoryEntry) {
     var expanded by rememberSaveable(entry.id) { mutableStateOf(false) }
     val timestamp = remember(entry.createdAtMillis) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(entry.createdAtMillis)) }
-    OutlinedCard(Modifier.fillMaxWidth().testTag("history-${entry.id}")) {
+    PubCard(Modifier.fillMaxWidth().testTag("history-${entry.id}")) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(entry.title, style = MaterialTheme.typography.titleMedium)
-            Text("${kindLabel(entry)} · ${statusLabel(entry)}", style = MaterialTheme.typography.labelLarge)
+            Eyebrow("${kindLabel(entry)} · ${statusLabel(entry)}")
             Text(timestamp, style = MaterialTheme.typography.bodySmall)
             if (!expanded) Text(entry.prompt.replace('\n', ' ').take(180) + if (entry.prompt.length > 180) "…" else "", style = MaterialTheme.typography.bodyMedium)
             // Compact: the first line of each summary (how it was researched; how many checks passed).
             if (!expanded) listOfNotNull(entry.research, entry.checks).forEach {
                 Text(it.lineSequence().first(), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("history-detail-${entry.id}"))
             }
-            TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide request" else "Review full request") }
+            PubTextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide request" else "Review full request") }
             if (expanded) {
                 Text("Submitted instructions", style = MaterialTheme.typography.titleSmall)
                 SelectionContainer { Text(entry.prompt) }

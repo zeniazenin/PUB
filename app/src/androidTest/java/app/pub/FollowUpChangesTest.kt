@@ -140,11 +140,12 @@ class FollowUpChangesTest {
         ActivityScenario.launch<MainActivity>(intent).use { scenario ->
             scenario.onActivity { host = ViewModelProvider(it)[HostModel::class.java] }
             try {
-                compose.onNodeWithText("Try it, then fine-tune").assertIsDisplayed()
+                // Review: the draft first, then Adjust with what was asked for; the rail says which step this is.
+                compose.onNodeWithTag("step-rail").assertIsDisplayed()
                 compose.onNodeWithTag("draft-card").assertIsDisplayed()
                 compose.onNodeWithText("What should change?").assertExists()
                 compose.onNodeWithText("Speak a change").performScrollTo().assertIsDisplayed()
-                compose.onNodeWithText("Apply changes").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithTag("apply-changes").performScrollTo().assertIsDisplayed()
                 compose.onNodeWithTag("request-trail").performScrollTo().assertIsDisplayed()
                 compose.onNodeWithText("A counter", substring = true).assertExists()
                 compose.onNodeWithText("Make the count bigger", substring = true).assertExists()
@@ -152,7 +153,7 @@ class FollowUpChangesTest {
                 compose.runOnIdle { assertEquals("Add a reset button", controller.prompt) }
 
                 // Request changes closes the preview of the draft and returns to the change box, keeping its text.
-                compose.onNodeWithText("Preview app").performScrollTo().performClick()
+                compose.onNodeWithTag("try-app").performClick()
                 compose.waitUntil(15000) { host.ui != null || host.failure != null }
                 compose.runOnIdle { assertNull(host.failure); assertTrue(host.preview) }
                 compose.onNodeWithTag("request-changes").assertIsDisplayed().performClick()
@@ -160,17 +161,19 @@ class FollowUpChangesTest {
                 compose.onNodeWithTag("change-box").assertIsDisplayed()
                 compose.runOnIdle { assertEquals("Add a reset button", controller.prompt); assertNotNull(controller.draft) }
 
-                // A saved app's Edit returns to the builder to change that app.
-                compose.onNodeWithText("Preview app").performScrollTo().performClick()
-                compose.waitUntil(15000) { host.ui != null || host.failure != null }
-                compose.onNodeWithTag("save-preview").performClick()
-                compose.waitUntil(15000) { host.projectOpen && !host.preview && host.ui != null }
+                // Publish: Continue shows what saving does; Add to Your apps saves the draft and opens the saved app.
+                compose.onNodeWithTag("continue-publish").performClick()
+                compose.onNodeWithTag("publish-step").assertIsDisplayed()
+                compose.onNodeWithText("Starts empty and stays on this phone.").assertExists()
+                compose.onNodeWithTag("publish").performClick()
+                compose.waitUntil(20000) { host.projectOpen && !host.preview && host.ui != null }
                 compose.runOnIdle { saved = host.projects.first { it.id == host.projectId } }
                 compose.onNodeWithTag("request-changes").assertDoesNotExist()
                 compose.onNodeWithTag("edit-app").assertIsDisplayed().performClick()
                 compose.waitUntil(5000) { !host.projectOpen }
                 compose.runOnIdle { assertEquals(saved!!.id, controller.editingProject?.id); assertNull(controller.draft) }
-                compose.onNodeWithText("Edit Follow-up counter 2").assertIsDisplayed()
+                // A saved app's Edit returns to the builder to change that app.
+                compose.onNodeWithText("EDIT · FOLLOW-UP COUNTER 2").assertIsDisplayed()
                 compose.onNodeWithText("What would you like to change?").assertExists()
                 compose.onNodeWithText("Speak a change").performScrollTo().assertIsDisplayed()
             } finally {

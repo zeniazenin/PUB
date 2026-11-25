@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.pub.HostModel
 import app.pub.core.StyleColors
 import app.pub.core.StyleGuide
@@ -83,13 +84,18 @@ fun StyleGuideScreen(host: HostModel) {
         Section("Corners")
         Chips(listOf("sharp" to "Sharp", "rounded" to "Rounded", "round" to "Round"), guide.corners, "style-corners") { change(guide.withCorners(it)) }
 
-        Section("Font")
-        Chips(listOf("sans" to "Sans", "serif" to "Serif", "mono" to "Mono"), guide.font, "style-font",
-            labelStyle = { TextStyle(fontFamily = when (it) { "serif" -> FontFamily.Serif; "mono" -> FontFamily.Monospace; else -> FontFamily.SansSerif }) }) {
+        Section("Type", "Retro faces for headlines and text. Small labels are always Silkscreen pixel capitals.")
+        Chips(listOf("sans" to "Pixel", "serif" to "LCD", "mono" to "Terminal"), guide.font, "style-font",
+            labelStyle = { TextStyle(fontFamily = PubType.display(it), fontSize = 16.sp) }) {
             change(guide.withFont(it))
         }
+        Text(when (guide.font) {
+            "serif" -> "Doto dot-matrix headlines and numbers, Pixelify Sans text."
+            "mono" -> "VT323 terminal type throughout."
+            else -> "Pixelify Sans pixel type throughout."
+        }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        TextButton(onClick = { change(StyleGuide.DEFAULT) }, enabled = guide != StyleGuide.DEFAULT, modifier = Modifier.testTag("style-reset")) {
+        PubTextButton(onClick = { change(StyleGuide.DEFAULT) }, enabled = guide != StyleGuide.DEFAULT, modifier = Modifier.testTag("style-reset")) {
             Text("Reset to PUB's default style")
         }
 
@@ -126,7 +132,7 @@ private fun StylePreview() {
 @Composable
 private fun Section(title: String, note: String? = null) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
+        Eyebrow(title)
         note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }

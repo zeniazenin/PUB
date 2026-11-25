@@ -1,4 +1,7 @@
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/pub_icon_art"
-    android:gravity="fill"
-    android:filter="true" />
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated: PUB's pixel mark, a "P" with a terminal cursor on a 12 x 12 cell grid. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp"
+    android:viewportWidth="270" android:viewportHeight="270">
+    <path android:fillColor="#FF8CF0C0" android:pathData="M86,86h8v8h-8zM96,86h8v8h-8zM106,86h8v8h-8zM116,86h8v8h-8zM126,86h8v8h-8zM136,86h8v8h-8zM146,86h8v8h-8zM86,96h8v8h-8zM96,96h8v8h-8zM106,96h8v8h-8zM116,96h8v8h-8zM126,96h8v8h-8zM136,96h8v8h-8zM146,96h8v8h-8zM156,96h8v8h-8zM86,106h8v8h-8zM96,106h8v8h-8zM146,106h8v8h-8zM156,106h8v8h-8zM86,116h8v8h-8zM96,116h8v8h-8zM146,116h8v8h-8zM156,116h8v8h-8zM86,126h8v8h-8zM96,126h8v8h-8zM106,126h8v8h-8zM116,126h8v8h-8zM126,126h8v8h-8zM136,126h8v8h-8zM146,126h8v8h-8zM156,126h8v8h-8zM86,136h8v8h-8zM96,136h8v8h-8zM106,136h8v8h-8zM116,136h8v8h-8zM126,136h8v8h-8zM136,136h8v8h-8zM146,136h8v8h-8zM86,146h8v8h-8zM96,146h8v8h-8zM86,156h8v8h-8zM96,156h8v8h-8zM86,166h8v8h-8zM96,166h8v8h-8zM86,176h8v8h-8zM96,176h8v8h-8z" />
+    <path android:fillColor="#FFFFC084" android:pathData="M136,166h8v8h-8zM146,166h8v8h-8zM156,166h8v8h-8zM166,166h8v8h-8zM136,176h8v8h-8zM146,176h8v8h-8zM156,176h8v8h-8zM166,176h8v8h-8z" />
+</vector>

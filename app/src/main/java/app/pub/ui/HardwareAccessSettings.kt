@@ -26,9 +26,9 @@ fun HardwareAccessSettings(host:HostModel,onAndroidSettings:()->Unit) {
     val mic=cap=="microphone"
     val block=if(mic) host.globalBlocked else host.hardwareBlocked(cap)
     val default=if(mic) host.globalDefault else host.hardwareDefault(cap)
-    Text("Access",style=MaterialTheme.typography.titleLarge)
+    Column(verticalArrangement=Arrangement.spacedBy(4.dp)) { Eyebrow("Permissions"); Text("Access",style=MaterialTheme.typography.titleLarge) }
     Box {
-        OutlinedButton(onClick={capsOpen=true},modifier=Modifier.fillMaxWidth().testTag("capability-picker")){Text(groups[cap] ?: cap)}
+        PubOutlinedButton(onClick={capsOpen=true},modifier=Modifier.fillMaxWidth().testTag("capability-picker")){Text(groups[cap] ?: cap)}
         DropdownMenu(expanded=capsOpen,onDismissRequest={capsOpen=false}) {
             groups.forEach {(key,label)->DropdownMenuItem(text={Text(label)},onClick={cap=key;capsOpen=false})}
         }
@@ -51,7 +51,7 @@ fun HardwareAccessSettings(host:HostModel,onAndroidSettings:()->Unit) {
     else {
         val own=if(mic) host.microphoneRuleFor(selected.first) else host.hardwareRule(selected.first,cap)
         Box {
-            OutlinedButton(onClick={projectsOpen=true},modifier=Modifier.fillMaxWidth().testTag("project-permission-picker")){Text(selected.second)}
+            PubOutlinedButton(onClick={projectsOpen=true},modifier=Modifier.fillMaxWidth().testTag("project-permission-picker")){Text(selected.second)}
             DropdownMenu(expanded=projectsOpen,onDismissRequest={projectsOpen=false}) {choices.forEach {(id,name)->DropdownMenuItem(text={Text(name)},onClick={projectId=id;projectsOpen=false})}}
         }
         FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -63,7 +63,7 @@ fun HardwareAccessSettings(host:HostModel,onAndroidSettings:()->Unit) {
     }
     if(cap==PhoneFilesContract.CAPABILITY) Text("Apps see only the files and folders you pick in Android's file picker, by name, size and type. A rule controls whether an app may use them; Forget file access removes what it was given. Your files are never deleted with an app.",style=MaterialTheme.typography.bodySmall)
     Text("Apps must declare the capability. Android permissions and device selection still apply. Changing access stops active hardware sessions.",style=MaterialTheme.typography.bodySmall)
-    OutlinedButton(onClick=onAndroidSettings){Text("Android app permissions")}
+    PubOutlinedButton(onClick=onAndroidSettings){Text("Android app permissions")}
 }
 
 /** How many files and folders the saved app [id] was given, and Forget file access, which releases them all. */
@@ -76,5 +76,5 @@ private fun FileAccessForApp(host:HostModel,id:String) {
         1 -> "Has access to 1 file or folder you picked"
         else -> "Has access to $count files and folders you picked"
     },style=MaterialTheme.typography.bodyMedium)
-    OutlinedButton(onClick={host.forgetFileAccess(id)},enabled=(count ?: 0)>0,modifier=Modifier.testTag("forget-file-access")){Text("Forget file access")}
+    PubOutlinedButton(onClick={host.forgetFileAccess(id)},enabled=(count ?: 0)>0,modifier=Modifier.testTag("forget-file-access")){Text("Forget file access")}
 }

@@ -15,7 +15,7 @@ PUB (Personal Utility Builder) is an Android app published by LTTL LLC ("we", "u
 
 PUB builds apps with your ChatGPT account. You sign in on OpenAI's own page in your browser, and PUB never sees your ChatGPT password. Signing in, refreshing the session, loading the list of models and disconnecting exchange account tokens with OpenAI.
 
-When you tap **Generate app** or **Generate changes**, PUB sends OpenAI a series of requests:
+When you tap **Build app**, **Build changes** or **Apply changes**, PUB sends OpenAI a series of requests:
 
 - **Research:** your description of the app. For an edit, it also includes the app's name, description and saved research. OpenAI may run web searches for this request.
 - **Screen planning, building and icon design:**

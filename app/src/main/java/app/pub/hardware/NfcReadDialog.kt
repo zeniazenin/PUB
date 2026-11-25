@@ -1,5 +1,7 @@
 package app.pub.hardware
 
+import app.pub.ui.PubTextButton
+
 import android.app.Activity
 import android.content.ContextWrapper
 import android.nfc.NfcAdapter
@@ -55,5 +57,5 @@ fun NfcReadDialog(onResult:(JsonObject)->Unit,onDismiss:()->Unit) {
         main.postDelayed({if(live && !delivered) {stop();status="No tag read. Close and try again."}},30000)
         onDispose {live=false;stop();main.removeCallbacksAndMessages(null);lifecycle.removeObserver(observer)}
     }
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Read NFC tag")},text={Text(status)},confirmButton={TextButton(onClick=onDismiss){Text("Close")}})
+    AlertDialog(onDismissRequest=onDismiss,title={Text("Read NFC tag")},text={Text(status)},confirmButton={PubTextButton(onClick=onDismiss){Text("Close")}})
 }

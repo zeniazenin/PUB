@@ -120,7 +120,7 @@ class VoiceInputUiTest {
         }
         compose.onNodeWithText("Speak your idea").performClick()
         compose.runOnIdle { blocked.value = true }
-        compose.onNodeWithText("Waiting for voice input…").assertIsNotEnabled()
+        compose.onNodeWithText("Listening…").assertIsNotEnabled()
         compose.runOnIdle { registry.deliver() }
         compose.onNodeWithTag("voice-draft").assertTextEquals("Keep my typed description")
         compose.onNodeWithText("Speak your idea").assertIsNotEnabled()

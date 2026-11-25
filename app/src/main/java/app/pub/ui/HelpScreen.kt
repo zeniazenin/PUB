@@ -31,11 +31,12 @@ fun HelpScreen(host: HostModel) {
     ) {
         HelpSection("Build your first app",
             "1. Connect your ChatGPT account in Settings. Automatic model selection prefers the newest available Astra; you can choose another available model.",
-            "2. Choose Create app from the launcher. Type your idea or tap Speak your idea. Describe the task, inputs, results and any data you want the app to remember.",
-            "3. Review the description, then tap Generate app. PUB first researches similar apps and best practices, plans the screens, then builds. Building needs an internet connection and uses eligible ChatGPT plan usage.",
-            "4. Review the generated app’s requested access and tap Preview app. Try its controls and check its results before choosing Save locally. Closing an unsaved preview discards its temporary data; you can preview the draft again.",
-            "Something to adjust? Tap Request changes in the preview, or return to the builder, which now shows the draft first with a Request changes box under it. Type what should change or tap Speak a change, then tap Apply changes. Each change builds on the current draft, so you can keep adjusting until it’s right; What you asked for lists your idea and every change since. When the draft’s behavior checks still fail or its visual review still sees issues, Quick fixes add them to the box as text you can edit. If a change fails or you cancel it, the draft and your text stay as they were. A change that completes replaces the draft; to go back, describe that as another change or discard the draft.",
-            "5. Open saved apps from their launcher icons. Tap ✕ Close or use Android Back to return to the launcher. To change an open app, tap Edit next to ✕ Close. Long-press any launcher app icon for Edit app, Use style guide or Delete app. Edit sends the current app code, the app’s saved research and behavior checks and your requested changes, then lets you preview and save an update to the same app. Existing saved data, files and photos are retained; changes made while testing an edit preview are discarded. Delete asks for confirmation and removes the app and its saved data.",
+            "2. Tap New app on the launcher. The builder has three steps, shown at the top: Describe, Review and Publish.",
+            "3. Describe: type your idea or tap Speak your idea. Say what the app is for, what you put in, what it should show and any data it should remember. Tap Build app. PUB researches similar apps, plans the screens, builds, tests the app’s behavior and checks its first screen; the steps tick off as it goes. Building needs an internet connection and uses eligible ChatGPT plan usage.",
+            "4. Review: the draft, how many behavior checks passed, the visual check and the access it asks for. Tap Try it to use it. To adjust it, type what should change under Request changes, or tap Speak a change, then tap Apply changes. Each change builds on the current draft, so you can keep adjusting until it’s right; What you asked for lists your idea and every change since. When the draft’s checks still fail or its visual review still sees issues, Quick fixes add them to the box as text you can edit. If a change fails or you cancel it, the draft and your text stay as they were. A change that completes replaces the draft; to go back, describe that as another change or discard the draft. How it was built (research, screen plan, checks and visual review) is folded away below.",
+            "While you try a draft, Request changes takes you back to the box and Save locally saves it right away. Closing a preview discards what you did in it; you can try the draft again.",
+            "5. Publish: tap Continue to see what saving does (where the app lives, its data and access), then Add to Your apps. PUB opens the app once it is saved.",
+            "6. Open saved apps from their launcher icons. Tap ✕ or use Android Back to return to the launcher. To change an open app, tap Edit next to ✕. Long-press any launcher app icon for Edit app, Use style guide or Delete app. Edit sends the current app code, the app’s saved research and behavior checks and your requested changes, then lets you preview and save an update to the same app. Existing saved data, files and photos are retained; changes made while testing an edit preview are discarded. Delete asks for confirmation and removes the app and its saved data.",
             "A new install starts with one sample app, Tip Calculator, copied into Your apps on first launch. It is an ordinary saved app: open, edit or delete it like any other. Deleting it is permanent; it is not added again. Upgrades and installs that already have apps don’t get it.")
         HelpSection("What you can build today",
             "Small tools with text, inputs, buttons, choices, photos, illustrations, interactive diagrams and a pitch meter: calculators, checklists, tuners, photo notes and simple sensor displays. Saved apps run locally without another model request and follow your style guide (Settings → Style): light or dark, colours, corners and font. Long-press an app and turn off Use style guide to show it in PUB’s default style instead.",
@@ -94,7 +95,7 @@ fun HelpScreen(host: HostModel) {
             "NFC reads NDEF records from a tag while PUB’s reader screen is open; writing tags and card emulation are unavailable. USB host access uses PUB’s device chooser, Android’s device permission and a selected device’s bulk-transfer interface. A compatible cable, host support and the accessory’s protocol are required; PUB is not a general USB driver.")
         HelpSection("Voice instructions",
             "Speak your idea, and Speak a change for drafts and edits, use your phone’s speech service, which may process audio online. PUB requests offline recognition when available, but the provider decides whether it can fulfill that request.",
-            "PUB receives the recognized text and appends it to your description or change. Review or edit it before tapping Generate or Apply changes. Dictation alone does not send an app-generation request to OpenAI.",
+            "PUB receives the recognized text and appends it to your description or change. Review or edit it before tapping Build app or Apply changes. Dictation alone does not send an app-generation request to OpenAI.",
             "If voice input is unavailable, enable a speech service in Android settings or type your description. Settings → Access → Block microphone everywhere also blocks builder dictation.",
             "Apps can offer the same dictation in their text fields, shown as a microphone in the field. The recognized text is added as if you typed it; the app never receives audio and needs no microphone permission. The microphone block in Settings → Access turns it off for every app.")
         HelpSection("Permissions and local data",
@@ -108,7 +109,7 @@ fun HelpScreen(host: HostModel) {
             "Before generating, PUB sends a separate research request with only your description (and, for edits, the app's name, description and saved research). With web search, OpenAI performs the searches; the sources it used are shown in the builder. When you edit an app, generation also receives the current app code and the app’s original request and saved behavior checks.",
             "Connecting ChatGPT and loading models also require internet access. Disconnecting your ChatGPT account stops using that connection for building; saved apps still run locally.")
         val context = LocalContext.current
-        TextButton(onClick = { openInBrowser(context, BuildConfig.PRIVACY_POLICY_URL) }, modifier = Modifier.testTag("help-privacy-policy")) {
+        PubTextButton(onClick = { openInBrowser(context, BuildConfig.PRIVACY_POLICY_URL) }, modifier = Modifier.testTag("help-privacy-policy")) {
             Text("Read the privacy policy")
         }
         HorizontalDivider()
@@ -118,7 +119,7 @@ fun HelpScreen(host: HostModel) {
         HelpSection("Current limits",
             "Generated apps cannot use general internet requests, Wi-Fi controls, files you have not picked for them, notifications, scheduled tasks, background services, raw health data or biometrics. Camera and accessory support is limited to the features described above; hardware presence does not guarantee protocol support.",
             "Generated apps use PUB’s supported controls and capabilities. Test their behavior, calculations and accessory commands before relying on them. An unsent description may be lost if Android closes PUB; build drafts are kept until you save or discard them.")
-        TextButton(onClick = { contextOpen = !contextOpen }, modifier = Modifier.testTag("help-context")) {
+        PubTextButton(onClick = { contextOpen = !contextOpen }, modifier = Modifier.testTag("help-context")) {
             Text(if (contextOpen) "Hide phone context" else "View current phone context")
         }
         if (contextOpen) {
@@ -134,6 +135,6 @@ fun HelpScreen(host: HostModel) {
 @Composable
 private fun HelpSection(title: String, vararg paragraphs: String) {
     Text(title, style = MaterialTheme.typography.titleLarge)
-    paragraphs.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
-    HorizontalDivider()
+    paragraphs.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }

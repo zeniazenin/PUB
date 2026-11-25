@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -37,7 +40,8 @@ fun VoicePromptButton(
     globallyBlocked: Boolean,
     label: String = "Speak your idea",
     speechPrompt: String = "Describe the app you want to build",
-    addedMessage: String = "Voice text added. Review or edit it before generating."
+    addedMessage: String = "Voice text added. Review or edit it before generating.",
+    modifier: Modifier = Modifier
 ) {
     val currentPrompt by rememberUpdatedState(prompt)
     val currentChange by rememberUpdatedState(onPromptChange)
@@ -70,8 +74,8 @@ fun VoicePromptButton(
         }
     }
 
-    Column {
-        OutlinedButton(
+    Column(modifier, verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
+        PubOutlinedButton(
             enabled = enabled && !globallyBlocked && !awaitingResult && prompt.length < MAX_DESCRIPTION,
             modifier = Modifier.fillMaxWidth().testTag("voice-input"),
             onClick = {
@@ -98,15 +102,17 @@ fun VoicePromptButton(
                 }
             }
         ) {
-            Text(if (awaitingResult) "Waiting for voice input…" else label)
+            androidx.compose.material3.Icon(PubIcons.Mic, null, Modifier.size(18.dp))
+            androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+            Text(if (awaitingResult) "Listening…" else label)
         }
         val status = when {
             globallyBlocked -> "Voice input is blocked in Settings → Access."
             prompt.length >= MAX_DESCRIPTION -> "Your description has reached its 8,000-character limit."
             else -> null
         }
-        status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 
 }

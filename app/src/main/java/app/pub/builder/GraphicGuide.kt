@@ -23,6 +23,10 @@ object GraphicGuide {
         path:{id,type:'path',commands:[['M',x,y],['L',x,y],['C',cx1,cy1,cx2,cy2,x,y],['Q',cx,cy,x,y],['Z']]}.
         Path max64 commands, first M. No SVG/XML/HTML/CSS/URLs or arbitrary properties.
         Draw layers in order. Give each changing part its own shape ID; highlight IDs must refer to actual shapes.
+        VECTOR STYLE (PUB's look is light, precise and modern): pick a canvas near the size it is shown at (about 320 wide) so units are close to dp.
+        Use one light outline weight for the whole drawing, about 0.5% of the canvas width (1.5-2 on a 320 canvas), and at most one heavier weight for the single most important line.
+        Prefer outlines and flat theme-colour fills over heavy black strokes; no drop shadows, gradients or textures. Use surfaceContainer or surfaceVariant for large background areas, primary for the subject, tertiary for one accent.
+        Put coordinates on whole or half units, keep 8% of the canvas as clear margin, reuse one corner radius, and draw each object as few shapes as reads clearly (one closed path rather than many small pieces). Text shapes size 10-14 for labels.
         For instrument tuners prefer vectors: draw the body/neck/strings with curves, label strings and highlight the detected string
         after a confident pitch. Clear highlights on silence, unreliable pitch and stop. Pitch estimates the nearest string;
         it cannot prove which physical string was plucked when pitches coincide. Do not highlight only a manual target and call it detected.

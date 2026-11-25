@@ -1,5 +1,9 @@
 package app.pub.hardware
 
+import app.pub.ui.PubButton
+import app.pub.ui.PubOutlinedButton
+import app.pub.ui.PubTextButton
+
 import android.view.Surface
 import android.view.MotionEvent
 import android.hardware.camera2.CameraCharacteristics
@@ -194,7 +198,7 @@ fun CameraCaptureScreen(directory: File, onResult: (JsonObject) -> Unit, onDismi
             Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Take a photo", style = MaterialTheme.typography.titleLarge)
-                    TextButton(onClick = close, modifier = Modifier.testTag("camera-close")) { Text("× Close") }
+                    PubTextButton(onClick = close, modifier = Modifier.testTag("camera-close")) { Text("× Close") }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
@@ -202,7 +206,7 @@ fun CameraCaptureScreen(directory: File, onResult: (JsonObject) -> Unit, onDismi
                 }
                 CameraChoice("Lens", lens?.label ?: "Checking cameras…", availableLenses.map { it.key to it.label }, !busy,
                     "camera-lens-selector") { selectedKey = it }
-                TextButton(onClick = { controlsOpen = !controlsOpen }, modifier = Modifier.testTag("camera-controls")) {
+                PubTextButton(onClick = { controlsOpen = !controlsOpen }, modifier = Modifier.testTag("camera-controls")) {
                     Text(if (controlsOpen) "Hide camera controls" else "Camera controls · ${availableLenses.size} lens routes")
                 }
                 if (lens != null) Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -233,7 +237,7 @@ fun CameraCaptureScreen(directory: File, onResult: (JsonObject) -> Unit, onDismi
                 controlMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Button(
+                PubButton(
                     enabled = capture != null && cameraReady && !busy,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("camera-capture"),
                     onClick = {
@@ -302,7 +306,7 @@ fun CameraCaptureScreen(directory: File, onResult: (JsonObject) -> Unit, onDismi
 private fun CameraChoice(title: String, value: String, choices: List<Pair<String, String>>, enabled: Boolean, tag: String, choose: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled && choices.isNotEmpty(), modifier = Modifier.fillMaxWidth().testTag(tag)) {
+        PubOutlinedButton(onClick = { expanded = true }, enabled = enabled && choices.isNotEmpty(), modifier = Modifier.fillMaxWidth().testTag(tag)) {
             Text("$title: $value")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 360.dp)) {

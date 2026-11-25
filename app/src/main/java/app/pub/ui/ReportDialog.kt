@@ -85,7 +85,7 @@ fun ReportDialog(target: ReportTarget, onDismiss: () -> Unit) {
             modifier = Modifier.testTag("report-dialog"),
             title = { Text("Report sent") },
             text = { Text("Thank you. PUB's developer reviews every report.") },
-            confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("report-done")) { Text("Done") } }
+            confirmButton = { PubTextButton(onClick = onDismiss, modifier = Modifier.testTag("report-done")) { Text("Done") } }
         )
         return
     }
@@ -138,9 +138,9 @@ fun ReportDialog(target: ReportTarget, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(
+            PubTextButton(
                 onClick = {
-                    val chosen = reason ?: return@TextButton
+                    val chosen = reason ?: return@PubTextButton
                     sending = true; failed = false
                     scope.launch {
                         val ok = withContext(Dispatchers.IO) { ReportSender.send(target.report(chosen, details, include)) }
@@ -152,6 +152,6 @@ fun ReportDialog(target: ReportTarget, onDismiss: () -> Unit) {
                 modifier = Modifier.testTag("report-send")
             ) { Text("Send report") }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !sending) { Text("Cancel") } }
+        dismissButton = { PubTextButton(onClick = onDismiss, enabled = !sending) { Text("Cancel") } }
     )
 }

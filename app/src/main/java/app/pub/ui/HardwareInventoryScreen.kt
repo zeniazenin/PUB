@@ -43,7 +43,7 @@ fun HardwareInventoryScreen() {
         item {
             Text("Hardware inventory", style = MaterialTheme.typography.headlineSmall)
             Text("Everything Android makes visible through its public hardware APIs. Hidden manufacturer interfaces may not be discoverable.", style = MaterialTheme.typography.bodyMedium)
-            OutlinedButton(onClick = { refresh++ }, enabled = !loading, modifier = Modifier.testTag("refresh-hardware-inventory")) { Text("Refresh inventory") }
+            PubOutlinedButton(onClick = { refresh++ }, enabled = !loading, modifier = Modifier.testTag("refresh-hardware-inventory")) { Text("Refresh inventory") }
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
@@ -133,7 +133,7 @@ private fun InventorySection(title: String, summary: String, initiallyOpen: Bool
     var open by rememberSaveable(title) { mutableStateOf(initiallyOpen) }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { open = !open }, modifier = Modifier.fillMaxWidth()) { Text("${if (open) "▾" else "▸"} $title", style = MaterialTheme.typography.titleMedium) }
+            PubTextButton(onClick = { open = !open }, modifier = Modifier.fillMaxWidth()) { Text("${if (open) "▾" else "▸"} $title", style = MaterialTheme.typography.titleMedium) }
             Text(summary, style = MaterialTheme.typography.bodyMedium)
             if (open) content()
         }
@@ -145,7 +145,7 @@ private fun MetadataRow(title: String, summary: String, details: JsonObject) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall)
         Text(summary, style = MaterialTheme.typography.bodySmall)
-        TextButton(onClick = { open = !open }) { Text(if (open) "Hide details" else "Show details") }
+        PubTextButton(onClick = { open = !open }) { Text(if (open) "Hide details" else "Show details") }
         if (open) details.entrySet().forEach { (key, value) -> Text("${readable(key)}: ${renderValue(value)}", style = MaterialTheme.typography.bodySmall) }
         HorizontalDivider()
     }

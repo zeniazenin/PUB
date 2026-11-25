@@ -10,8 +10,8 @@ PUB has one style guide, set in **Settings → Style → Edit style guide**. PUB
 | Main colour | Eight presets or any `#RRGGBB` | Primary buttons, highlights, icons, eyebrow text, graphics |
 | Second colour | Automatic or any `#RRGGBB` | Selected rows, filter chips, secondary graphic parts |
 | Third colour | Automatic or any `#RRGGBB` | Contrasting accents, such as a meter's needle |
-| Corners | Sharp, Rounded, Round | Buttons, cards, chips, fields, list rows, launcher tiles, dialogs |
-| Font | Sans, Serif, Mono (system fonts) | All text, including text shapes in graphics |
+| Corners | Sharp, Rounded, Round | Buttons (never pills: square, 4 dp or 10 dp), cards, chips, fields, list rows, launcher tiles, dialogs |
+| Type pairing | Pixel, LCD, Terminal (bundled retro fonts; stored as `sans`, `serif`, `mono`) | All text, including text shapes in graphics |
 
 - **Live:** the screen shows a sample app in the current style, and every change applies at once, to saved apps too.
 - **Reset:** "Reset to PUB's default style" returns to the default: dark, moss, apricot third colour, rounded, sans.
@@ -41,13 +41,18 @@ The style guide is data PUB draws with, not instructions to the model. Generated
   - A picked colour is used exactly when it suits the mode: in dark mode when it is light (tone 60-95), in light mode when white text on it reads at 4.5:1. Otherwise the palette's standard tone of the same hue is used (80 in dark mode, 40 in light mode).
   - Text on every role colour keeps at least 4.5:1 contrast; JVM tests check this for many colours in both modes.
   - Error colours are Material's standard ones.
-- **`PubTheme` (app):** applies the scheme, a type scale in the chosen font family and a shape scale for the corners. It is used by:
+- **`PubTheme` (app):** applies the scheme, the type pairing's scale and a shape scale for the corners. It is used by:
   - PUB's screens;
   - the running app (in that app's style);
   - the private preview that the visual review captures.
 - **Neutrals:** backgrounds and surfaces are tinted slightly by the main colour, so a blue guide has blue-grey surfaces. Upgraded installs keep their exact main and third colours; their backgrounds are now these tinted neutrals.
 - **Launcher mark:** in light mode PUB's own logo sits on its dark pine icon background, which it was drawn for.
-- **Components:** `NativeRenderer` gives buttons and list rows the style's corners. Material's buttons are always pill-shaped otherwise, so PUB's own buttons stay pill-shaped.
+- **Type pairings:** retro faces for an old-school software look: a display face for headlines with a text face for reading, and Silkscreen pixel capitals for small labels in every pairing. Line heights stay those of Material's type scale, so the space the builder tells the model each element takes stays true.
+  - Pixel (`sans`): Pixelify Sans headlines and text.
+  - LCD (`serif`): Doto dot-matrix headlines and big numbers (round dots), Pixelify Sans text.
+  - Terminal (`mono`): VT323 throughout, set a quarter larger because its glyphs are small for their size.
+  - The fonts are bundled in `res/font` (variable Pixelify Sans and Doto; static Silkscreen and VT323) under the SIL Open Font License; their licenses are in `assets/licenses`. No weight is ever synthesized, so pixels stay crisp.
+- **Components:** Material 3 draws buttons as pills whatever the theme says, so PUB's screens use `PubButton`, `PubOutlinedButton` and `PubTextButton`, and `NativeRenderer` passes the same shape to apps' buttons: square, 4 dp or 10 dp for Sharp, Rounded or Round. Cards are `PubCard`: one tone above the background with a hairline edge instead of a shadow. See `docs/design-language.md`.
 
 ## Graphics
 

@@ -195,7 +195,7 @@ class BuilderController(private val application: Application, private val backen
                 saved?.let {restore(it)}
                 if(saved?.running==true) {
                     // A build interrupted before its draft was ready still has its request in the box; after that it was cleared.
-                    message=if(prompt.isNotBlank()) "The previous build was interrupted. Its latest draft has been kept. Generate again to retry."
+                    message=if(prompt.isNotBlank()) "The previous build was interrupted. Its latest draft has been kept. Build it again to retry."
                         else "The previous build was interrupted. Its latest draft has been kept. Preview it, retry its review or describe a change."
                     visualReviewError="Build interrupted before completion. No automatic retry was sent."
                     hasBuildResult=true
@@ -461,7 +461,8 @@ class BuilderController(private val application: Application, private val backen
         // A change to the current draft continues its requests; any other build starts a new list.
         val earlierRequests=if(draft!=null) draftRequests else emptyList()
         val pendingSpec=specLoad
-        operation(BUILDING) {
+        // The build's first phase; later phases set their own labels.
+        operation(RESEARCHING) {
             check(model.isNotBlank()) { "Select an available model first" }
             require(request.isNotBlank() && request.length<=8000) { "Describe your app in 1 to 8000 characters" }
             var historyId: String?=null

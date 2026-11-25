@@ -85,7 +85,8 @@ fun NativeGraphic(
     val colors = MaterialTheme.colorScheme
     val palette = remember(colors) { GraphicAsset.THEME_COLORS.associateWith { (PubColors.graphicColor(colors, it) ?: Color.Transparent).toArgb() } }
     val font = LocalPubStyle.current.font
-    val paint = remember(font) { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = PubType.typeface(font); strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND } }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val paint = remember(font) { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = PubType.typeface(context, font); strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND } }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val availableWidth = if (maxWidth.value.isFinite()) maxWidth else 320.dp
         val viewHeight = (availableWidth / (width / height)).coerceIn(120.dp, 360.dp)

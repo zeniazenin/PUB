@@ -15,7 +15,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -126,6 +130,26 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
         ?.takeIf { !builder.buildInProgress && (!builder.hasBuildResult || builder.editingProject?.id == it.id) }
         ?.let { project -> { model.closeProject(); builder.beginEdit(project); destination = "builder"; revealChanges++ } }
     val openSettings = { settingsReturn = destination; destination = "settings" }
+    // Saving an open preview: the saved app replaces the preview and the builder moves on to editing it.
+    val saveOpenPreview = {
+        model.savePreview { historyId, saved ->
+            builder.markSaved(historyId, saved.id, saved.bundle.name)
+            builder.beginEdit(saved)
+        }
+    }
+    // Publish (the builder's last step) goes through the same save as a preview: it opens the draft, saves it once it
+    // has rendered without a failure, and the saved app stays open. A failure stays on screen in the preview.
+    var publishPending by remember { mutableStateOf(false) }
+    val publish: (app.pub.core.ProjectBundle) -> Unit = { bundle ->
+        if (runCatching { model.previewProject(bundle, builder.editingProject, builder.draftHistoryId) }.isSuccess) publishPending = true
+    }
+    LaunchedEffect(publishPending, model.ui, model.failure, model.preview) {
+        if (!publishPending) return@LaunchedEffect
+        when {
+            !model.preview || model.failure != null -> publishPending = false
+            model.ui != null && !model.savingPreview -> { publishPending = false; saveOpenPreview() }
+        }
+    }
     val back = {
         if (model.projectOpen) closeProject()
         else { destination = when (destination) { "help", "inventory", "style" -> "settings"; "history" -> historyReturn; "settings" -> settingsReturn; else -> "launcher" } }
@@ -167,29 +191,34 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.safeDrawingPadding().fillMaxSize()) {
                 if (model.projectOpen) {
-                    RunningAppScreen(model, closeProject, editRunning, requestChanges) {
-                        model.savePreview { historyId, saved ->
-                            builder.markSaved(historyId, saved.id, saved.bundle.name)
-                            builder.beginEdit(saved)
-                        }
-                    }
+                    RunningAppScreen(model, closeProject, editRunning, requestChanges) { saveOpenPreview() }
                 } else {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // A slim top bar: back and settings as icons, the screen's name in the display face.
+                    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = if (destination == "launcher") 20.dp else 6.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
                         if (destination != "launcher") {
-                            TextButton(onClick = back, modifier = Modifier.testTag("back")) { Text("‹ Back") }
-                            Spacer(Modifier.width(8.dp))
+                            IconButton(onClick = back, modifier = Modifier.testTag("back")) { Icon(PubIcons.Back, "Back", Modifier.size(22.dp)) }
                         }
                         if (destination == "launcher") {
                             LauncherBrand(Modifier.weight(1f).padding(end = 12.dp))
                         } else {
-                            Text(when(destination) { "settings" -> "Settings"; "help" -> "Help & guide"; "inventory" -> "Hardware inventory"; "style" -> "Style guide"; "history" -> "Prompt history"; else -> if(builder.capturePending!=null) "Checking preview" else if (builder.editingProject != null) "Edit app" else "Create app" },
-                                style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text(when(destination) { "settings" -> "Settings"; "help" -> "Help & guide"; "inventory" -> "Hardware"; "style" -> "Style guide"; "history" -> "Prompt history"; else -> if (builder.editingProject != null) "Edit app" else "New app" },
+                                style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 4.dp))
                         }
-                        if (destination != "settings" && destination != "help" && destination != "inventory" && destination != "style" && destination != "history") OutlinedButton(onClick = openSettings, modifier = Modifier.testTag("settings")) { Text("Settings") }
+                        if (destination != "settings" && destination != "help" && destination != "inventory" && destination != "style" && destination != "history")
+                            IconButton(onClick = openSettings, modifier = Modifier.testTag("settings")) { Icon(PubIcons.Settings, "Settings", Modifier.size(22.dp)) }
                     }
                     if(destination=="launcher" && (builder.buildInProgress || builder.hasBuildResult)) {
-                        TextButton(onClick={destination="builder"},modifier=Modifier.fillMaxWidth().testTag("resume-build")) {
-                            Text(if(builder.buildInProgress) "Build in progress - view status" else "View build result")
+                        val colors = MaterialTheme.colorScheme
+                        Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp).fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                            .background(colors.secondaryContainer.copy(alpha = .55f)).clickable(onClickLabel = "Open the builder") { destination = "builder" }
+                            .padding(horizontal = 16.dp, vertical = 14.dp).testTag("resume-build"),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(colors.primary))
+                            Text(if(builder.buildInProgress) "Build in progress" else "Draft ready to review", style = MaterialTheme.typography.titleSmall,
+                                color = colors.onSecondaryContainer, modifier = Modifier.weight(1f))
+                            Text(if(builder.buildInProgress) "View status" else "View build result", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                            Icon(PubIcons.ChevronRight, null, Modifier.size(16.dp), tint = colors.primary)
                         }
                     }
                     Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged {
@@ -201,10 +230,8 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                                 onEdit = { builder.beginEdit(it); destination = "builder" },
                                 onDelete = { deleteTarget = it },
                                 onReport = { reportTarget = ReportTarget.app(ContentReport.Subject.APP, it.bundle) }) { builder.beginCreate(); destination = "builder" }
-                            "builder" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                                BuilderScreen(builder, model, openSettings, { historyReturn = "builder"; historyProject = builder.editingProject?.id; historySession=builder.historySessionId; builder.refreshHistory(); destination = "history" }, onGenerate=requestBuild,
-                                    revealChanges = revealChanges, onChangesRevealed = { revealChanges = 0 }) { model.previewProject(it, builder.editingProject, builder.draftHistoryId) }
-                            }
+                            "builder" -> BuilderScreen(builder, model, openSettings, { historyReturn = "builder"; historyProject = builder.editingProject?.id; historySession=builder.historySessionId; builder.refreshHistory(); destination = "history" }, onGenerate=requestBuild,
+                                revealChanges = revealChanges, onChangesRevealed = { revealChanges = 0 }, onPublish = publish) { model.previewProject(it, builder.editingProject, builder.draftHistoryId) }
                             "history" -> PromptHistoryScreen(builder, historyProject, historySession)
                             "inventory" -> HardwareInventoryScreen()
                             "style" -> StyleGuideScreen(model)
@@ -221,16 +248,16 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                     else if(model.preview) "You choose each file or folder in Android's file picker; this preview can use only what you pick, until you close it. Your files are never deleted when the preview closes."
                     else "You choose each file or folder in Android's file picker; the app can use only what you pick, and only while it is open in PUB. It keeps access to what you picked until you forget it in Settings → Access. Deleting the app never deletes your files.")},
                 confirmButton={Column {
-                    TextButton(onClick={model.hardwareConsent(true)}) {Text("Allow this session")}
-                    if(!model.preview) TextButton(onClick={model.hardwareConsent(true,true)}) {Text("Always allow while open")}
-                }}, dismissButton={TextButton(onClick={model.hardwareConsent(false)}){Text("Not now")}}
+                    PubTextButton(onClick={model.hardwareConsent(true)}) {Text("Allow this session")}
+                    if(!model.preview) PubTextButton(onClick={model.hardwareConsent(true,true)}) {Text("Always allow while open")}
+                }}, dismissButton={PubTextButton(onClick={model.hardwareConsent(false)}){Text("Not now")}}
             ) }
             model.devicePicker?.let { picker -> AlertDialog(
                 onDismissRequest={picker.complete(null)},title={Text("Choose a device")},
                 text={Column(Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState())) {
                     if(picker.choices.isEmpty()) Text("No compatible devices found. Check Android connections and try again.")
-                    picker.choices.forEach { choice -> TextButton(onClick={picker.complete(choice.id)},modifier=Modifier.fillMaxWidth()){Text(choice.label)} }
-                }},confirmButton={TextButton(onClick={picker.complete(null)}){Text("Cancel")}}
+                    picker.choices.forEach { choice -> PubTextButton(onClick={picker.complete(choice.id)},modifier=Modifier.fillMaxWidth()){Text(choice.label)} }
+                }},confirmButton={PubTextButton(onClick={picker.complete(null)}){Text("Cancel")}}
             ) }
             model.cameraRequest?.let { callback -> key(callback) { CameraCaptureScreen(model.cameraDirectory, { callback(it) }, { callback(null) }) } }
             model.nfcRequest?.let { callback -> key(callback) { NfcReadDialog({callback(it)},{callback(null)}) } }
@@ -239,17 +266,17 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                 title = { Text("Let ${model.projectName} use the microphone?") },
                 text = { Text("Pitch is measured on your phone. No audio is saved or uploaded by this app. Access ends when you close it or leave PUB.") },
                 confirmButton = { Column {
-                    TextButton(onClick = model::allowSession) { Text("Allow this session") }
-                    if (!model.preview) TextButton(onClick = model::allowProject) { Text("Always allow while open") }
+                    PubTextButton(onClick = model::allowSession) { Text("Allow this session") }
+                    if (!model.preview) PubTextButton(onClick = model::allowProject) { Text("Always allow while open") }
                 } },
-                dismissButton = { TextButton(onClick = model::deny) { Text("Not now") } }
+                dismissButton = { PubTextButton(onClick = model::deny) { Text("Not now") } }
             )
             reportTarget?.let { ReportDialog(it) { reportTarget = null } }
             deleteTarget?.let { project -> AlertDialog(
                 onDismissRequest = { deleteTarget = null }, title = { Text("Delete ${project.bundle.name}?") },
                 text = { Text("This removes the app and its saved data from this phone. Files and folders you picked for it elsewhere on the phone are kept; only its access to them ends.") },
-                confirmButton = { TextButton(onClick = { model.deleteProject(project); if (builder.editingProject?.id == project.id) builder.beginCreate(); deleteTarget = null }) { Text("Delete") } },
-                dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
+                confirmButton = { PubTextButton(onClick = { model.deleteProject(project); if (builder.editingProject?.id == project.id) builder.beginCreate(); deleteTarget = null }) { Text("Delete") } },
+                dismissButton = { PubTextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
             ) }
         }
     }
@@ -262,42 +289,48 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
 @Composable
 private fun ColumnScope.RunningAppScreen(model: HostModel, close: () -> Unit, edit: (() -> Unit)?, requestChanges: (() -> Unit)?, save: () -> Unit) {
     // Pinned host controls stay outside the generated UI and cannot be hidden by an app.
-    Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=8.dp), verticalAlignment=Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
+    Row(Modifier.fillMaxWidth().heightIn(min=60.dp).padding(start=20.dp,end=6.dp), verticalAlignment=Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement=Arrangement.spacedBy(2.dp)) {
+            if(model.preview) Eyebrow("Preview", color=MaterialTheme.colorScheme.primary)
             Text(model.projectName, style=MaterialTheme.typography.titleLarge, maxLines=1, overflow=TextOverflow.Ellipsis)
-            if(model.preview) Text("Preview", color=MaterialTheme.colorScheme.primary, style=MaterialTheme.typography.labelMedium)
         }
-        edit?.let { TextButton(onClick=it, modifier=Modifier.testTag("edit-app")) { Text("Edit") } }
-        TextButton(onClick=close, enabled=!model.savingPreview, modifier=Modifier.testTag("close-app").semantics { contentDescription="Close app" }) { Text("✕  Close") }
+        edit?.let { PubTextButton(onClick=it, modifier=Modifier.testTag("edit-app")) {
+            Icon(PubIcons.Edit, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Edit")
+        } }
+        IconButton(onClick=close, enabled=!model.savingPreview, modifier=Modifier.testTag("close-app").semantics { contentDescription="Close app" }) {
+            Icon(PubIcons.Close, null, Modifier.size(22.dp))
+        }
     }
-    HorizontalDivider()
+    HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
     if (model.hardwareAccessEnabled) Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
         val filesOnly = model.onlyFileAccessActive
         Text(if (filesOnly) "Phone file access enabled" else "Device access enabled",modifier=Modifier.weight(1f),style=MaterialTheme.typography.labelMedium)
-        TextButton(onClick=model::stopHardware){Text(if (filesOnly) "Stop access" else "Stop hardware")}
+        PubTextButton(onClick=model::stopHardware){Text(if (filesOnly) "Stop access" else "Stop hardware")}
     }
     if (model.listening) Surface(color=MaterialTheme.colorScheme.primaryContainer) {
         Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
             Text(model.microphoneMessage, modifier=Modifier.weight(1f), style=MaterialTheme.typography.labelMedium)
-            TextButton(onClick=model::stop) { Text("Stop") }
+            PubTextButton(onClick=model::stop) { Text("Stop") }
         }
     }
-    if (model.preview) Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        Text(if (model.previewEditTarget != null) "Save changes updates the app code. Your existing saved data, files and photos are kept; changes made in this preview are discarded." else "Try it before saving. Closing discards preview changes, including its files.",style=MaterialTheme.typography.bodySmall)
-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp,Alignment.End)) {
-            requestChanges?.let { OutlinedButton(onClick=it,enabled=!model.savingPreview,modifier=Modifier.testTag("request-changes")) { Text("Request changes") } }
-            Button(onClick=save,enabled=model.ui!=null && model.failure==null && !model.savingPreview,modifier=Modifier.testTag("save-preview")) {
+    if (model.preview) Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow).padding(horizontal=20.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+        Text(if (model.previewEditTarget != null) "Save changes updates the app code. Your existing saved data, files and photos are kept; changes made in this preview are discarded." else "Try it before saving. Closing discards preview changes, including its files.",
+            style=MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+            requestChanges?.let { PubOutlinedButton(onClick=it,enabled=!model.savingPreview,modifier=Modifier.weight(1f).testTag("request-changes")) { Text("Request changes") } }
+            PubButton(onClick=save,enabled=model.ui!=null && model.failure==null && !model.savingPreview,modifier=Modifier.weight(1f).testTag("save-preview")) {
                 Text(if (model.savingPreview) "Saving…" else if (model.previewEditTarget != null) "Save changes" else "Save locally")
             }
         }
     }
+    if (model.preview) HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
     key(model.projectId) {
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp).testTag("running-app"),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             val dictation = rememberAppDictation(blocked = model.globalBlocked)
             model.ui?.let { NativeRenderer(it,model::action,model::input,model::resolveImage,model::graphicAsset,dictation) } ?: Text(model.failure ?: "Opening app…")
             if(model.failure!=null) {
                 Text(model.failure!!,color=MaterialTheme.colorScheme.error)
-                Button(onClick=model::restart) { Text("Restart app") }
+                PubButton(onClick=model::restart) { Text("Restart app") }
             }
         }
     }

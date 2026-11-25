@@ -60,6 +60,13 @@ interface BuilderState {
     val checksError:String?
     val history:List<PromptHistoryEntry>
     val historyError:String?
+    /** A newly designed icon for a saved app, waiting for the user to use or dismiss it. */
+    val iconProposal:IconProposal?
+    /** Why the last icon redesign did not produce a proposal. */
+    val iconDesignError:String?
+    fun redesignIcon(project:SavedProject)
+    fun clearIconProposal()
+    fun projectUpdated(project:SavedProject)
     fun beginEdit(project:SavedProject)
     fun beginCreate()
     fun refreshHistory()

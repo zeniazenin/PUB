@@ -23,6 +23,7 @@ When you tap **Build app**, **Build changes** or **Apply changes**, PUB sends Op
   - the research findings
   - details about your phone: manufacturer and model, Android version and API level, screen size, text size, language, light or dark theme, the app's style (your style guide's colours, corner shape and font, or PUB's default style), which hardware features are available, the capabilities you blocked for all apps, and the features PUB supports
   - for an edit: the app's current code and graphics definitions (not photo pixels), and its saved original request, research and behavior checks
+- **Redesign icon:** when you choose **Redesign icon** for a saved app and tap **Design icon**, PUB sends the app's name and description, the category and summary of its saved research if it has some, and PUB's icon instructions. Nothing else about the app or your phone is sent.
 - **Checks and repairs:** a screenshot of the new app's first screen, rendered privately with empty storage and no hardware access. It's sent with your request, the research and the app's code so the model can check and fix the result. When a check fails, the failing checks are sent with the repair request.
 
 PUB never sends OpenAI:

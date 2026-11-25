@@ -51,7 +51,8 @@ fun LauncherBrand(modifier: Modifier = Modifier) {
  * glyphs proportional to their column, and New app pinned below.
  */
 @Composable
-fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (SavedProject) -> Unit, onReport: (SavedProject) -> Unit, onCreate: () -> Unit) {
+fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (SavedProject) -> Unit, onReport: (SavedProject) -> Unit,
+                   onRedesignIcon: ((SavedProject) -> Unit)? = null, canRedesignIcon: (SavedProject) -> Boolean = { true }, onCreate: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val side = 20.dp
@@ -75,7 +76,8 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
                 items(host.projects, key = { it.id }) { project ->
                     LauncherTile(project.id, project.bundle.name, graphic = project.bundle.icon?.let { project.bundle.assets[it]?.asJsonObject }, tile = tile,
                         followsStyle = host.usesStyleGuide(project.id), onFollowStyle = { host.changeUsesStyleGuide(project.id, it) },
-                        onEdit = { onEdit(project) }, onDelete = { onDelete(project) }, onReport = { onReport(project) }) { host.openProject(project) }
+                        onEdit = { onEdit(project) }, onDelete = { onDelete(project) }, onReport = { onReport(project) },
+                        onRedesignIcon = onRedesignIcon?.takeIf { canRedesignIcon(project) }?.let { redesign -> { redesign(project) } }) { host.openProject(project) }
                 }
             }
         }
@@ -92,7 +94,7 @@ fun LauncherScreen(host: HostModel, onEdit: (SavedProject) -> Unit, onDelete: (S
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LauncherTile(id: String, name: String, graphic: com.google.gson.JsonObject? = null, tile: Dp, followsStyle: Boolean, onFollowStyle: (Boolean) -> Unit,
-                         onEdit: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onOpen: () -> Unit) {
+                         onEdit: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onRedesignIcon: (() -> Unit)?, onOpen: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     Box {
     Column(
@@ -109,6 +111,11 @@ private fun LauncherTile(id: String, name: String, graphic: com.google.gson.Json
     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
         DropdownMenuItem(text = { Text("Edit app") }, leadingIcon = { Icon(PubIcons.Edit, null, Modifier.size(18.dp)) },
             modifier = Modifier.testTag("edit-app-$id"), onClick = { menuOpen = false; onEdit() })
+        // Redesign icon is absent while it cannot run (a build is running, or this app has an unsaved edit draft).
+        onRedesignIcon?.let { redesign ->
+            DropdownMenuItem(text = { Text("Redesign icon") }, leadingIcon = { Icon(PubIcons.Spark, null, Modifier.size(18.dp)) },
+                modifier = Modifier.testTag("redesign-icon-$id"), onClick = { menuOpen = false; redesign() })
+        }
         DropdownMenuItem(text = { Text("Use style guide") }, trailingIcon = { if (followsStyle) Icon(PubIcons.Check, null, Modifier.size(18.dp)) },
             modifier = Modifier.testTag("style-app-menu-$id").semantics { stateDescription = if (followsStyle) "On" else "Off" },
             onClick = { menuOpen = false; onFollowStyle(!followsStyle) })

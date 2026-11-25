@@ -40,7 +40,12 @@ interface BuilderBackend {
         generateApp(model,request,context,existing)
     /** UI planning. null skips planning; throwing simulates a failed planning step. */
     fun plan(model:String,request:String,existing:ProjectBundle?,brief:ResearchBrief?,stored:UiPlan?):UiPlan? = null
+    /** A new launcher icon for a saved app ([IconDesigner]); throwing simulates a failed design. */
+    fun designIcon(model:String,bundle:ProjectBundle,brief:ResearchBrief?):com.google.gson.JsonObject = throw IllegalStateException("No icon designer")
 }
+
+/** A newly designed icon for the saved app [projectId], designed from [basedOn] (its package when the design started). */
+data class IconProposal(val projectId:String,val basedOn:ProjectBundle,val icon:com.google.gson.JsonObject)
 
 class BuilderController(private val application: Application, private val backend:BuilderBackend?=null,
     historyContext:android.content.Context=application, override val backgroundManaged:Boolean=backend==null): BuilderState {
@@ -86,6 +91,8 @@ class BuilderController(private val application: Application, private val backen
         /** BuildNotifications.phase maps this label by its "testing" substring. */
         const val TESTING = "Testing app behavior…"
         const val CHECKS_UNAVAILABLE = "Behavior checks could not run. Preview and test the app before saving."
+        const val DESIGNING_ICON = "Designing an icon…"
+        const val ICON_DESIGN_FAILED = "Could not design an icon. Check your connection and try again."
         // Repair requests are bounded like user prompts (8000 characters); this leaves room for the instructions.
         private const val MAX_REPAIR_CHECK_DATA = 6000
         fun checksStillFail(report:ChecksReport,reason:String?=null):String {
@@ -360,6 +367,35 @@ class BuilderController(private val application: Application, private val backen
                 reloadHistory(); true
             } catch (_: Exception) { historyError="Local prompt history could not be updated. Existing records have been preserved."; false }
         }
+    }
+    override var iconProposal by mutableStateOf<IconProposal?>(null); private set
+    override var iconDesignError by mutableStateOf<String?>(null); private set
+    /**
+     * Designs a new launcher icon for the saved [project] with the icon step builds use ([IconDesigner]: one request, or
+     * two when the first design is too busy), given the app's saved research when it has some. The result is only a
+     * proposal; the host stores it when the user chooses it. Nothing runs while a build is running or the builder is busy.
+     */
+    override fun redesignIcon(project: SavedProject) {
+        if(restoring || saving || buildInProgress || busy!=null) return
+        iconProposal=null;iconDesignError=null
+        val model=selectedModel
+        operation(DESIGNING_ICON) {
+            try {
+                check(model.isNotBlank()) { "Select an available model in Settings first." }
+                val brief=withContext(Dispatchers.IO) { runCatching { specStore.read(project.id)?.brief }.getOrNull() }
+                val icon=network { backend?.designIcon(model,project.bundle,brief) ?: IconDesigner(auth).design(model,project.bundle,brief) }
+                iconProposal=IconProposal(project.id,project.bundle,icon)
+            } catch(error:CancellationException) {throw error}
+            catch(error:Exception) {
+                currentCoroutineContext().ensureActive()
+                iconDesignError=if(error is IllegalStateException && error.message?.startsWith("Select")==true) error.message else ICON_DESIGN_FAILED
+            }
+        }
+    }
+    override fun clearIconProposal() { iconProposal=null;iconDesignError=null }
+    /** A saved app changed outside the builder (such as a new icon): an edit of it without a draft continues from the new package. */
+    override fun projectUpdated(project: SavedProject) {
+        if(editingProject?.id==project.id && draft==null && !buildInProgress) editingProject=project
     }
     override fun setVisible(value: Boolean) { auth.foreground=value }
     /**

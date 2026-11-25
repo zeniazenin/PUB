@@ -110,6 +110,10 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
     }
     LaunchedEffect(openBuildSignal) {if(openBuildSignal>0) {model.closeProject();destination="builder"}}
     var deleteTarget by remember { mutableStateOf<SavedProject?>(null) }
+    // Redesign icon: the saved app whose icon is being redesigned, and the state of storing the chosen icon.
+    var iconTarget by remember { mutableStateOf<SavedProject?>(null) }
+    var iconSaving by remember { mutableStateOf(false) }
+    var iconSaveError by remember { mutableStateOf<String?>(null) }
     var reportTarget by remember { mutableStateOf<ReportTarget?>(null) }
     val closeProject = {
         // Closing discards the preview's photos, which an in-progress save is still copying.
@@ -229,7 +233,11 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                             "launcher" -> LauncherScreen(model,
                                 onEdit = { builder.beginEdit(it); destination = "builder" },
                                 onDelete = { deleteTarget = it },
-                                onReport = { reportTarget = ReportTarget.app(ContentReport.Subject.APP, it.bundle) }) { builder.beginCreate(); destination = "builder" }
+                                onReport = { reportTarget = ReportTarget.app(ContentReport.Subject.APP, it.bundle) },
+                                // Not while a build runs, the builder is busy, or this app has an unsaved edit draft (its save would then be stale).
+                                onRedesignIcon = { project: SavedProject -> iconSaveError = null; iconTarget = project }
+                                    .takeIf { !builder.buildInProgress && builder.busy == null },
+                                canRedesignIcon = { !(builder.hasBuildResult && builder.editingProject?.id == it.id) }) { builder.beginCreate(); destination = "builder" }
                             "builder" -> BuilderScreen(builder, model, openSettings, { historyReturn = "builder"; historyProject = builder.editingProject?.id; historySession=builder.historySessionId; builder.refreshHistory(); destination = "history" }, onGenerate=requestBuild,
                                 revealChanges = revealChanges, onChangesRevealed = { revealChanges = 0 }, onPublish = publish) { model.previewProject(it, builder.editingProject, builder.draftHistoryId) }
                             "history" -> PromptHistoryScreen(builder, historyProject, historySession)
@@ -272,6 +280,15 @@ private fun PubApp(model: HostModel, builder: BuilderModel, openBuildSignal:Int,
                 dismissButton = { PubTextButton(onClick = model::deny) { Text("Not now") } }
             )
             reportTarget?.let { ReportDialog(it) { reportTarget = null } }
+            iconTarget?.let { project -> IconRedesignDialog(project, builder, iconSaving, iconSaveError,
+                onUse = { proposal ->
+                    iconSaving = true; iconSaveError = null
+                    model.useIcon(proposal.projectId, proposal.basedOn, proposal.icon) { saved, error ->
+                        iconSaving = false
+                        if (saved != null) { builder.projectUpdated(saved); builder.clearIconProposal(); iconTarget = null } else iconSaveError = error
+                    }
+                },
+                onSettings = openSettings, onClose = { iconTarget = null; iconSaveError = null }) }
             deleteTarget?.let { project -> AlertDialog(
                 onDismissRequest = { deleteTarget = null }, title = { Text("Delete ${project.bundle.name}?") },
                 text = { Text("This removes the app and its saved data from this phone. Files and folders you picked for it elsewhere on the phone are kept; only its access to them ends.") },

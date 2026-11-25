@@ -65,6 +65,24 @@ class HostModel(application: Application) : AndroidViewModel(application) {
     var previewEditTarget by mutableStateOf<SavedProject?>(null); private set
     /** Reads the current stored package from disk (no cache); safe to call off the main thread. */
     fun editableProject(id: String): SavedProject = checkNotNull(store.read(id)) { "App is no longer available" }
+    /**
+     * Makes [icon] the launcher icon of the saved app [id], whose package was [basedOn] when the icon was designed. Off
+     * the main thread; refuses (with a short reason for [onDone]) when the app changed or was deleted meanwhile, or has
+     * no room for another graphic. Only the package's icon changes: its code, data, files, photos and rules stay.
+     */
+    fun useIcon(id: String, basedOn: app.pub.core.ProjectBundle, icon: JsonObject, onDone: (saved: SavedProject?, error: String?) -> Unit) {
+        requireProjectId(id)
+        viewModelScope.launch {
+            val result = runCatching { withContext(Dispatchers.IO) {
+                val current = editableProject(id)
+                check(current.bundle.toJson() == basedOn.toJson()) { "The app changed while its icon was designed. Try again." }
+                val updated = checkNotNull(app.pub.core.AppIcon.withIcon(current.bundle, icon)) { "This app has no room for another graphic, so its icon can't change." }
+                store.update(id, updated) to listLibrary()
+            } }
+            result.onSuccess { (saved, library) -> projectsEpoch++; projects = library; onDone(saved, null) }
+                .onFailure { onDone(null, (it as? IllegalStateException)?.message ?: "Could not save the icon.") }
+        }
+    }
     var projectOpen by mutableStateOf(false)
         private set
     var projectId by mutableStateOf("")

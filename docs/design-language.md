@@ -57,7 +57,12 @@ Launcher icons are pictograms on a 48-unit grid (`core/AppIcon`).
 
 ### How an icon is designed
 
-Building a new app ends with the icon step (`IconDesigner`). Edits and repairs keep the app's existing icon.
+Building a new app ends with the icon step (`IconDesigner`). Edits and repairs keep the app's existing icon; **Redesign icon** in a saved app's long-press menu runs the same steps for it on request:
+- **Before anything is sent:** a dialog says what is sent and that it uses one or two plan requests, and nothing is sent until **Design icon**.
+- **Designing:** the builder's ChatGPT connection is used, and the app's saved research is given as context when it has some.
+- **Choosing:** the current and new icons appear side by side, with **Use new icon**, **Try again** and **Keep current**.
+- **Saving:** **Use new icon** stores the icon through the host only if the app is unchanged since the design started (`HostModel.useIcon`). It changes only the icon asset, and an open edit of that app (without a draft) continues from the new package, so its later save is not refused as stale.
+- **When it isn't offered:** while a build runs, while the builder is busy, or while that app has an unsaved edit draft.
 
 1. **Design.** One short request asks for a single minimalist line pictogram, like SF Symbols or Phosphor at a light weight; its clean geometry is what survives the pixel grid well. The request sets out the style:
    - **Process:** consider three metaphors, choose the one recognised fastest at 24 px that needs the fewest shapes, then remove every shape that doesn't change what the icon is.
